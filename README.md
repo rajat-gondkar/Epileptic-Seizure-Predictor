@@ -256,20 +256,6 @@ eeg-genetic-fusion/
 
 ---
 
-## Team
-
-| Name | Role |
-|------|------|
-| Rajat G A | Project Lead, EEG Pipeline, Model Architecture |
-| Srijeeta Ghosh | Genetic Feature Engineering, Data Analysis |
-| Aamir Ibrahim | Model Training, Evaluation |
-| Misab Abdul Raheem | Frontend Dashboard, API Integration |
-
-**Guide:** Prof. Deepika P  
-**Institution:** RV College of Engineering (RVCE), Bengaluru
-
----
-
 ## License
 
 This project is for academic and research purposes. The CHB-MIT dataset is provided under the PhysioNet Credentialed Health Data License and requires a signed data use agreement before access.
