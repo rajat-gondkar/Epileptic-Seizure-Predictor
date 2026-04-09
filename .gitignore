@@ -1,0 +1,83 @@
+# ================================================
+# EEG-Genetic Fusion — .gitignore
+# ================================================
+
+# ── Python ──────────────────────────────────────
+__pycache__/
+*.py[cod]
+*$py.class
+*.pyo
+*.pyd
+.Python
+*.egg
+*.egg-info/
+dist/
+build/
+.eggs/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# ── Virtual environment ──────────────────────────
+venv/
+env/
+.venv/
+ENV/
+
+# ── Jupyter ──────────────────────────────────────
+.ipynb_checkpoints/
+*.ipynb
+
+# ── EEG raw data (EDF files) ────────────────────
+# Large binary files — download via scripts/acquire_chbmit.py
+data/raw/chb-mit/**/*.edf
+data/raw/chb-mit/download_log.txt
+
+# ── Compressed raw genome files ─────────────────
+# Large compressed archives — download via scripts/acquire_genetic_data.py
+data/raw/clinvar/variant_summary.txt.gz
+data/raw/gnomad/*.bgz
+data/raw/gnomad/*.bgz.*
+
+# ── Processed data (NumPy arrays) ───────────────
+# Regenerate with: python src/data_pipeline/eeg_preprocessing.py --all
+data/processed/eeg_features/*.npy
+data/processed/eeg_features/*.npz
+
+# ── Model weights ────────────────────────────────
+models/*.pt
+models/*.pth
+models/*.pkl
+models/*.joblib
+models/*.json
+models/*.ubj
+
+# ── Reports / outputs ────────────────────────────
+reports/*.pdf
+reports/*.png
+reports/*.html
+
+# ── OS / Editor ──────────────────────────────────
+.DS_Store
+.DS_Store?
+._*
+Thumbs.db
+.vscode/
+.idea/
+
+# ── Environment / secrets ────────────────────────
+.env
+.env.*
+*.key
+
+# ── Docker volumes ───────────────────────────────
+postgres_data/
+
+# ── Node (frontend) ──────────────────────────────
+frontend/dashboard/node_modules/
+frontend/dashboard/dist/
+frontend/dashboard/.env
+
+# ── Misc ─────────────────────────────────────────
+nohup.out
+*.log

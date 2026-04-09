@@ -1,0 +1,16 @@
+snp_id,chromosome,mapped_gene,or_beta,p_value,trait,risk_allele_freq
+rs6732655,2,SCN1A,1.25,2.4e-15,generalized epilepsy,0.37
+rs1556832,2,SCN2A,1.18,3.1e-10,focal epilepsy,0.42
+rs55670523,2,SCN1A,1.31,1.2e-12,generalized epilepsy,0.28
+rs2947349,2,SCN1A/SCN2A,1.22,5.6e-11,epilepsy,0.35
+rs28498976,4,PCDH7,1.15,1.8e-08,generalized epilepsy,0.47
+rs72823592,9,KCNT1,1.42,4.5e-09,focal epilepsy,0.12
+rs1034114,12,SCN8A,1.19,7.2e-09,epilepsy,0.39
+rs117503424,16,GRIN2A,1.35,2.1e-08,focal epilepsy,0.08
+rs7163093,15,CHRNA7,1.12,9.3e-09,generalized epilepsy,0.44
+rs2292096,5,GABRA1,1.28,3.7e-10,absence epilepsy,0.22
+rs11890028,2,SCN1A,1.33,1.5e-14,febrile seizure,0.31
+rs4839797,20,KCNQ2,1.24,6.8e-09,neonatal seizure,0.18
+rs2241085,22,DEPDC5,1.17,4.2e-08,focal epilepsy,0.33
+rs13020210,2,SCN1A,1.27,8.9e-13,epilepsy,0.29
+rs12987787,2,SCN2A,1.16,2.3e-08,generalized epilepsy,0.41

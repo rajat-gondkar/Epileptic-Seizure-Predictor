@@ -1,0 +1,6 @@
+patient_id,SCN1A_mutation,SCN8A_mutation,KCNQ2_mutation,SCN2A_mutation,KCNT1_mutation,DEPDC5_mutation,PCDH19_mutation,GRIN2A_mutation,GABRA1_mutation,SCN1A_pLI,SCN8A_pLI,polygenic_risk_score
+chb01,0,0,0,0,0,0,0,0,0,1.0,1.0,1.0228946
+chb02,0,0,0,0,0,0,0,0,0,1.0,1.0,-1.6685914
+chb03,1,0,0,0,0,0,0,0,0,1.0,1.0,0.33875972
+chb04,0,0,0,0,0,0,0,0,0,1.0,1.0,0.21521714
+chb05,0,0,0,0,0,0,0,0,0,1.0,1.0,0.091722704

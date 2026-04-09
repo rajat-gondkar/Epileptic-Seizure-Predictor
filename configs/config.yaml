@@ -1,0 +1,148 @@
+# ============================================================
+# EEG-Genetic Fusion — Master Configuration
+# ============================================================
+
+# --- Paths ---
+paths:
+  project_root: "."
+  data:
+    raw:
+      chb_mit: "data/raw/chb-mit"
+      clinvar: "data/raw/clinvar"
+      gnomad: "data/raw/gnomad"
+      gwas: "data/raw/gwas"
+    processed:
+      eeg_features: "data/processed/eeg_features"
+      genetic_vectors: "data/processed/genetic_vectors"
+      synthetic: "data/processed/synthetic"
+    splits: "data/splits"
+  models: "models"
+  reports: "reports"
+
+# --- EEG Preprocessing ---
+eeg:
+  # Standard 10-20 system channels (18 channels)
+  channels:
+    - "FP1-F7"
+    - "F7-T7"
+    - "T7-P7"
+    - "P7-O1"
+    - "FP1-F3"
+    - "F3-C3"
+    - "C3-P3"
+    - "P3-O1"
+    - "FP2-F4"
+    - "F4-C4"
+    - "C4-P4"
+    - "P4-O2"
+    - "FP2-F8"
+    - "F8-T8"
+    - "T8-P8"
+    - "P8-O2"
+    - "FZ-CZ"
+    - "CZ-PZ"
+  sampling_rate: 256  # Hz
+  epoch_length_sec: 5
+  epoch_stride_sec: 1
+  preictal_window_min: 30
+  postictal_exclusion_min: 30
+  bandpass_low: 0.5    # Hz
+  bandpass_high: 70.0  # Hz
+  notch_freq: 60       # Hz (US power line)
+  artifact_threshold_uv: 500
+  # Frequency bands
+  bands:
+    delta: [0.5, 4.0]
+    theta: [4.0, 8.0]
+    alpha: [8.0, 12.0]
+    beta: [12.0, 30.0]
+    gamma: [30.0, 70.0]
+
+# --- Genetic Feature Engineering ---
+genetic:
+  target_genes:
+    - "SCN1A"
+    - "SCN8A"
+    - "KCNQ2"
+    - "SCN2A"
+    - "KCNT1"
+    - "DEPDC5"
+    - "PCDH19"
+    - "GRIN2A"
+    - "GABRA1"
+  pli_genes:
+    - "SCN1A"
+    - "SCN8A"
+  feature_dim: 12
+
+# --- LSTM Model ---
+lstm:
+  input_size: 18       # channels
+  hidden_size: 128
+  num_layers: 2
+  dropout: 0.3
+  bidirectional: true
+  # Training
+  optimizer: "adam"
+  learning_rate: 0.001
+  weight_decay: 0.0001
+  batch_size: 64
+  max_epochs: 50
+  early_stop_patience: 10
+  scheduler:
+    type: "reduce_on_plateau"
+    patience: 5
+    factor: 0.5
+  # Augmentation
+  augmentation:
+    gaussian_noise_sigma: 0.01
+    channel_dropout_prob: 0.1
+
+# --- XGBoost Model ---
+xgboost:
+  n_estimators: 300
+  max_depth: 4
+  learning_rate: 0.05
+  subsample: 0.8
+  colsample_bytree: 0.8
+  scale_pos_weight: 5
+  eval_metric: "auc"
+  early_stopping_rounds: 20
+
+# --- CTGAN ---
+ctgan:
+  epochs: 300
+  generator_dim: [256, 256]
+  discriminator_dim: [256, 256]
+  batch_size: 500
+  num_synthetic_samples: 1000
+
+# --- Fusion Layer ---
+fusion:
+  eeg_embedding_dim: 64
+  genetic_embedding_dim: 64
+  combined_dim: 128
+  epochs: 30
+  batch_size: 32
+  learning_rate: 0.001
+  l1_regularization: 0.01
+
+# --- Alert Thresholds ---
+alert:
+  level_1_max: 0.25    # Low (Green)
+  level_2_max: 0.50    # Moderate (Yellow)
+  level_3_max: 0.75    # High (Orange)
+  # >= 0.75: Critical (Red)
+
+# --- Database ---
+database:
+  host: "localhost"
+  port: 5432
+  name: "eeg_fusion"
+  user: "user"
+  password: "pass"
+
+# --- Dataset Selection ---
+dataset:
+  chb_mit_patients: ["chb01", "chb02", "chb03", "chb04", "chb05"]
+  # Set to full list for complete training: chb01 through chb24
