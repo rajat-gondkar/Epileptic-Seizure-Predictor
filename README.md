@@ -8,7 +8,7 @@
   <img src="https://img.shields.io/badge/Status-In%20Development-yellow" />
 </p>
 
-A multimodal AI system that fuses **real-time EEG signals** with **patient-specific genetic biomarkers** to deliver personalised, early epileptic seizure prediction. Built as part of the RVCE Interdisciplinary Design Project (IDP).
+A multimodal AI system that fuses **real-time EEG signals** with **patient-specific genetic biomarkers** to deliver personalised, early epileptic seizure prediction.
 
 ---
 
