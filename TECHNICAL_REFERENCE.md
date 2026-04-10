@@ -184,15 +184,17 @@ FZ-CZ, CZ-PZ
 | 1 | Preictal | Within 30 min prior to seizure onset; passes artifact check |
 | -1 | Excluded | Ictal period OR postictal window OR artifact rejected |
 
-### 3.6 Processed Dataset Statistics (completed patients)
+### 3.6 Processed Dataset Statistics
 
 | Patient | Total Epochs | Interictal | Preictal | Feature Shape | Sequence Shape |
 |---------|-------------|------------|----------|---------------|----------------|
 | chb01 | 95,699 | 86,837 | 8,862 | (95699, 221) | (95699, 1280, 17) |
 | chb03 | 87,780 | 80,519 | 7,261 | (87780, 221) | (87780, 1280, 17) |
-| chb05 | — | — | — | — | — (paused) |
+| chb05 | 49,919 | 47,107 | 2,812 | (49919, 221) | (49919, 1280, 17) |
+| **Total** | **233,398** | **214,463** | **18,935** | — | — |
 
-**Class imbalance ratio (interictal:preictal):** ~10:1 for chb01, ~11:1 for chb03
+**Overall class imbalance ratio (interictal : preictal): ~11.3 : 1**  
+Positive class weighting will be applied during model training to compensate.
 
 ---
 
