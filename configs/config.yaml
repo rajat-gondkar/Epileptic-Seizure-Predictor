@@ -77,7 +77,7 @@ genetic:
 
 # --- LSTM Model ---
 lstm:
-  input_size: 18       # channels
+  input_size: 17       # channels (18 target minus T8-P8 duplicate)
   hidden_size: 128
   num_layers: 2
   dropout: 0.3
@@ -144,5 +144,5 @@ database:
 
 # --- Dataset Selection ---
 dataset:
-  chb_mit_patients: ["chb01", "chb02", "chb03", "chb04", "chb05"]
-  # Set to full list for complete training: chb01 through chb24
+  chb_mit_patients: ["chb01", "chb03", "chb05", "chb06", "chb08", "chb10", "chb16", "chb20"]
+  # Original 3 + 5 new patients with selective downloads
