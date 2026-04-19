@@ -1,0 +1,135 @@
+{
+  "n_real": 119,
+  "n_synthetic": 1000,
+  "n_columns": 41,
+  "ks_pass_rate": 0.097,
+  "n_ks_pass": 3,
+  "n_ks_total": 31,
+  "mean_correlation_diff": 0.4044,
+  "ks_tests": {
+    "delta_power_mean": {
+      "statistic": 0.65,
+      "p_value": 0.0
+    },
+    "delta_power_std": {
+      "statistic": 0.809,
+      "p_value": 0.0
+    },
+    "theta_power_mean": {
+      "statistic": 0.685,
+      "p_value": 0.0
+    },
+    "theta_power_std": {
+      "statistic": 0.636,
+      "p_value": 0.0
+    },
+    "alpha_power_mean": {
+      "statistic": 0.728,
+      "p_value": 0.0
+    },
+    "alpha_power_std": {
+      "statistic": 0.737,
+      "p_value": 0.0
+    },
+    "beta_power_mean": {
+      "statistic": 0.776,
+      "p_value": 0.0
+    },
+    "beta_power_std": {
+      "statistic": 0.683,
+      "p_value": 0.0
+    },
+    "gamma_power_mean": {
+      "statistic": 0.543,
+      "p_value": 0.0
+    },
+    "gamma_power_std": {
+      "statistic": 0.767,
+      "p_value": 0.0
+    },
+    "alpha_beta_ratio_mean": {
+      "statistic": 0.1539,
+      "p_value": 0.0114
+    },
+    "alpha_beta_ratio_std": {
+      "statistic": 0.5645,
+      "p_value": 0.0
+    },
+    "theta_alpha_ratio_mean": {
+      "statistic": 0.1207,
+      "p_value": 0.0826
+    },
+    "theta_alpha_ratio_std": {
+      "statistic": 0.3714,
+      "p_value": 0.0
+    },
+    "spike_rate_mean": {
+      "statistic": 0.1699,
+      "p_value": 0.0037
+    },
+    "spike_rate_std": {
+      "statistic": 0.5912,
+      "p_value": 0.0
+    },
+    "variance_mean": {
+      "statistic": 0.709,
+      "p_value": 0.0
+    },
+    "variance_std": {
+      "statistic": 0.909,
+      "p_value": 0.0
+    },
+    "hjorth_activity_mean": {
+      "statistic": 0.768,
+      "p_value": 0.0
+    },
+    "hjorth_activity_std": {
+      "statistic": 0.781,
+      "p_value": 0.0
+    },
+    "hjorth_mobility_mean": {
+      "statistic": 0.2998,
+      "p_value": 0.0
+    },
+    "hjorth_mobility_std": {
+      "statistic": 0.2192,
+      "p_value": 0.0001
+    },
+    "hjorth_complexity_mean": {
+      "statistic": 0.2712,
+      "p_value": 0.0
+    },
+    "hjorth_complexity_std": {
+      "statistic": 0.2461,
+      "p_value": 0.0
+    },
+    "sample_entropy_mean": {
+      "statistic": 0.2617,
+      "p_value": 0.0
+    },
+    "sample_entropy_std": {
+      "statistic": 0.2609,
+      "p_value": 0.0
+    },
+    "preictal_ratio": {
+      "statistic": 0.1329,
+      "p_value": 0.0422
+    },
+    "n_valid_epochs": {
+      "statistic": 0.6093,
+      "p_value": 0.0
+    },
+    "SCN1A_pLI": {
+      "statistic": 0.0,
+      "p_value": 1.0
+    },
+    "SCN8A_pLI": {
+      "statistic": 0.0,
+      "p_value": 1.0
+    },
+    "polygenic_risk_score": {
+      "statistic": 0.3801,
+      "p_value": 0.0
+    }
+  }
+}
