@@ -404,6 +404,24 @@ def process_patient(patient_id, config=None, data_dir=None, output_dir=None):
     if not all_epochs:
         print(f"  No valid epochs for {patient_id}"); return stats
 
+    # ── Harmonise channel counts ──────────────────────────────
+    # Some patients have one file with a different channel count (e.g. chb16_18.edf has
+    # 18 channels while all other chb16 files have 17). Drop epochs from outlier files
+    # so concatenation doesn't crash.
+    channel_counts = [e.shape[2] for e in all_epochs]
+    from collections import Counter
+    dominant_n_ch = Counter(channel_counts).most_common(1)[0][0]
+    if len(set(channel_counts)) > 1:
+        n_before = sum(len(l) for l in all_labels)
+        keep = [i for i, c in enumerate(channel_counts) if c == dominant_n_ch]
+        dropped_files = len(all_epochs) - len(keep)
+        all_epochs   = [all_epochs[i]   for i in keep]
+        all_features = [all_features[i] for i in keep]
+        all_labels   = [all_labels[i]   for i in keep]
+        n_after = sum(len(l) for l in all_labels)
+        print(f"  ⚠ Channel mismatch: kept {dominant_n_ch}-ch files, "
+              f"dropped {dropped_files} file(s) ({n_before - n_after} epochs removed)")
+
     seqs  = np.concatenate(all_epochs,   axis=0)
     feats = np.concatenate(all_features, axis=0)
     labs  = np.concatenate(all_labels,   axis=0)

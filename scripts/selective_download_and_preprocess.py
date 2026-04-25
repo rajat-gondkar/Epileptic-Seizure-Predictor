@@ -78,7 +78,7 @@ def download_edf(patient_id, filename, data_dir, dry_run=False):
     url = f"{PHYSIONET_BASE}/{patient_id}/{filename}"
     dest = data_dir / patient_id / filename
 
-    if dest.exists() and dest.stat().st_size > 1_000_000:  # > 1MB = likely complete
+    if dest.exists() and dest.stat().st_size > 30_000_000:  # > 40 MB = likely complete EDF
         return "skip"
 
     if dry_run:
@@ -259,10 +259,19 @@ def main():
 
         # Step 6: Preprocess
         if not args.download_only:
-            print(f"\n  Starting preprocessing for {patient_id}...")
-            stats = preprocess_patient(patient_id)
-            if stats:
-                all_stats.append(stats)
+            feat_dir = PROJECT_ROOT / "data" / "processed" / "eeg_features"
+            already_done = all(
+                (feat_dir / f"{patient_id}_{s}.npy").exists()
+                for s in ["features", "labels", "sequences"]
+            )
+            if already_done:
+                print(f"  ⏭ Preprocessing already complete for {patient_id} — skipping")
+            else:
+                print(f"\n  Starting preprocessing for {patient_id}...")
+                stats = preprocess_patient(patient_id)
+                if stats:
+                    all_stats.append(stats)
+
 
     # Final summary
     print(f"\n{'='*60}")
