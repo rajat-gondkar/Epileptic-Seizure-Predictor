@@ -116,11 +116,16 @@ EDF File (CHB-MIT, 256 Hz)
 - Spike rate (peaks > 3 SD / sec)
 - Sample Entropy (m=2, r=0.2×SD)
 
-**Processed data (all 3 patients — complete):**
-- chb01: 95,699 epochs (86,837 interictal | 8,862 preictal)
-- chb03: 87,780 epochs (80,519 interictal | 7,261 preictal)
-- chb05: 49,919 epochs (47,107 interictal | 2,812 preictal)
-- **Total: 233,398 valid epochs | 18,935 preictal | ~11.3:1 class ratio**
+**Processed data (all 8 patients — complete):**
+- chb01: 95,699 epochs (86,837 interictal | 8,862 preictal) — full download
+- chb03: 87,780 epochs (80,519 interictal | 7,261 preictal) — full download
+- chb05: 49,919 epochs (47,107 interictal | 2,812 preictal) — full download
+- chb06: 17,472 epochs (16,216 interictal | 1,256 preictal) — selective download
+- chb08: 14,662 epochs (12,883 interictal | 1,779 preictal) — selective download
+- chb10: 16,642 epochs (14,839 interictal | 1,803 preictal) — selective download
+- chb16: 17,547 epochs (15,261 interictal | 2,286 preictal) — selective download
+- chb20: 33,894 epochs (27,385 interictal | 6,509 preictal) — selective download
+- **Total: 333,615 valid epochs | 32,568 preictal | ~9.2:1 class ratio**
 
 ---
 

@@ -28,7 +28,7 @@ import numpy as np
 import pandas as pd
 import yaml
 from ctgan import CTGAN
-from scipy.stats import ks_2samp
+from scipy.stats import ks_2samp, mannwhitneyu
 from sklearn.preprocessing import StandardScaler
 
 warnings.filterwarnings("ignore")
@@ -42,6 +42,12 @@ FEATURE_NAMES = [
     "hjorth_activity", "hjorth_mobility", "hjorth_complexity", "sample_entropy",
 ]
 N_FEATURES_PER_CHANNEL = 13
+
+# Columns that contain near-zero values (V²/Hz) and need log-transform
+LOG_TRANSFORM_STEMS = [
+    "delta_power", "theta_power", "alpha_power", "beta_power", "gamma_power",
+    "variance", "hjorth_activity",
+]
 
 GENETIC_COLUMNS = [
     "SCN1A_mutation", "SCN8A_mutation", "KCNQ2_mutation", "SCN2A_mutation",
@@ -102,8 +108,13 @@ def build_summary_dataset(config):
     ann_df = pd.read_csv(ann_path)
     ann_df = ann_df.apply(lambda c: c.str.strip() if c.dtype == object else c)
 
-    patients = [p for p in ["chb01", "chb03", "chb05"]
-                if (feat_dir / f"{p}_features.npy").exists()]
+    # Auto-detect all patients with processed features
+    all_patient_dirs = sorted(data_dir.iterdir())
+    patients = []
+    for d in all_patient_dirs:
+        if d.is_dir() and (feat_dir / f"{d.name}_features.npy").exists():
+            if d.name in genetic_df.index:
+                patients.append(d.name)
 
     print(f"Building summary dataset for patients: {patients}")
 
@@ -178,10 +189,24 @@ def build_summary_dataset(config):
             offset = end
 
     df = pd.DataFrame(records)
+
+    # ── Log-transform near-zero columns ──────────────────────
+    # Band powers, variance, hjorth_activity are in V²/Hz (~1e-10).
+    # CTGAN sees them all as 0. Log10(x + eps) makes them learnable.
+    log_cols = []
+    for stem in LOG_TRANSFORM_STEMS:
+        for suffix in ["_mean", "_std"]:
+            col = f"{stem}{suffix}"
+            if col in df.columns:
+                eps = 1e-15
+                df[col] = np.log10(df[col].clip(lower=eps) + eps)
+                log_cols.append(col)
+
     print(f"Summary dataset: {df.shape[0]} rows × {df.shape[1]} columns")
     print(f"  Seizure files: {df['has_seizure'].sum()} / {len(df)}")
     print(f"  Patients: {df['patient_id'].nunique()}")
-    return df
+    print(f"  Log-transformed columns: {len(log_cols)}")
+    return df, log_cols
 
 
 # ============================================================
@@ -191,13 +216,11 @@ def train_ctgan(summary_df, config, epochs=None):
     """
     Train CTGAN on the summary dataset.
 
-    Args:
-        summary_df: DataFrame from build_summary_dataset()
-        config: config dict
-        epochs: Override training epochs (default from config)
+    Applies StandardScaler on continuous columns before training
+    so CTGAN sees well-behaved distributions.
 
     Returns:
-        trained CTGAN model, list of training columns, list of discrete columns
+        trained CTGAN model, training columns, discrete columns, scaler, continuous columns
     """
     ctgan_cfg = config["ctgan"]
     if epochs is None:
@@ -209,12 +232,16 @@ def train_ctgan(summary_df, config, epochs=None):
 
     # Identify discrete columns
     discrete_cols = MUTATION_COLUMNS + ["has_seizure"]
-    # Filter to only columns that exist in train_df
     discrete_cols = [c for c in discrete_cols if c in train_df.columns]
+
+    # ── StandardScaler on continuous columns ──────────────────
+    continuous_cols = [c for c in train_df.columns if c not in discrete_cols]
+    scaler = StandardScaler()
+    train_df[continuous_cols] = scaler.fit_transform(train_df[continuous_cols])
 
     print(f"\nTraining CTGAN:")
     print(f"  Training data: {train_df.shape}")
-    print(f"  Continuous columns: {train_df.shape[1] - len(discrete_cols)}")
+    print(f"  Continuous columns: {len(continuous_cols)} (StandardScaled)")
     print(f"  Discrete columns: {len(discrete_cols)} → {discrete_cols}")
     print(f"  Epochs: {epochs}")
     print(f"  Generator dim: {ctgan_cfg['generator_dim']}")
@@ -231,17 +258,33 @@ def train_ctgan(summary_df, config, epochs=None):
 
     model.fit(train_df, discrete_columns=discrete_cols)
 
-    return model, list(train_df.columns), discrete_cols
+    return model, list(train_df.columns), discrete_cols, scaler, continuous_cols
 
 
 # ============================================================
 # 3. Generate & Constrain
 # ============================================================
-def generate_synthetic(model, n_samples, columns, discrete_cols):
-    """Generate raw synthetic samples."""
+def generate_synthetic(model, n_samples, columns, discrete_cols,
+                       scaler=None, continuous_cols=None, log_cols=None):
+    """
+    Generate synthetic samples and inverse-transform:
+      1. Inverse StandardScaler on continuous columns
+      2. Inverse log10 on log-transformed columns (10^x)
+    """
     print(f"\nGenerating {n_samples} synthetic samples...")
     synthetic = model.sample(n_samples)
     synthetic.columns = columns
+
+    # Inverse StandardScaler
+    if scaler is not None and continuous_cols is not None:
+        synthetic[continuous_cols] = scaler.inverse_transform(synthetic[continuous_cols])
+
+    # Inverse log10 → back to original scale
+    if log_cols:
+        for col in log_cols:
+            if col in synthetic.columns:
+                synthetic[col] = np.power(10, synthetic[col])
+
     return synthetic
 
 
@@ -440,20 +483,25 @@ def main():
     print("CTGAN SYNTHETIC DATA GENERATION")
     print("=" * 60)
 
-    # Step 1: Build summary dataset
-    summary_df = build_summary_dataset(config)
+    # Step 1: Build summary dataset (with log-transform applied)
+    summary_df, log_cols = build_summary_dataset(config)
     summary_df.to_csv(output_dir / "real_summary_dataset.csv", index=False)
     print(f"  Saved real summary to {output_dir / 'real_summary_dataset.csv'}")
 
-    # Step 2: Train CTGAN
-    model, columns, discrete_cols = train_ctgan(summary_df, config, epochs=args.epochs)
+    # Step 2: Train CTGAN (with StandardScaler applied)
+    model, columns, discrete_cols, scaler, continuous_cols = train_ctgan(
+        summary_df, config, epochs=args.epochs
+    )
 
     # Save model
     model.save(str(output_dir / "ctgan_model.pkl"))
     print(f"  Model saved to {output_dir / 'ctgan_model.pkl'}")
 
-    # Step 3: Generate synthetic data
-    synthetic_df = generate_synthetic(model, n_samples, columns, discrete_cols)
+    # Step 3: Generate synthetic data (inverse-scaled and inverse-logged)
+    synthetic_df = generate_synthetic(
+        model, n_samples, columns, discrete_cols,
+        scaler=scaler, continuous_cols=continuous_cols, log_cols=log_cols,
+    )
 
     # Step 4: Apply biological constraints
     synthetic_df = apply_biological_constraints(synthetic_df)
@@ -462,8 +510,12 @@ def main():
     synthetic_df.to_csv(output_dir / "synthetic_records.csv", index=False)
     print(f"  Saved {len(synthetic_df)} synthetic records to {output_dir / 'synthetic_records.csv'}")
 
-    # Step 6: Validate
-    validate_synthetic(summary_df, synthetic_df, output_dir=output_dir)
+    # Step 6: Validate — un-log the real data first so comparison is in original scale
+    real_for_val = summary_df.copy()
+    for col in log_cols:
+        if col in real_for_val.columns:
+            real_for_val[col] = np.power(10, real_for_val[col])
+    validate_synthetic(real_for_val, synthetic_df, output_dir=output_dir)
 
     print(f"\n{'='*60}")
     print("DONE")

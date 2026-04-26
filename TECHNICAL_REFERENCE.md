@@ -25,12 +25,12 @@ The output is a continuous risk score P_final ∈ [0, 1] mapped to a 4-level cli
 
 - **Source**: PhysioNet — https://physionet.org/content/chbmit/1.0.0/
 - **Format**: European Data Format (EDF)
-- **Patients used**: chb01, chb03, chb05 (subset of 24 total patients)
+- **Patients used**: chb01, chb03, chb05 (full download) + chb06, chb08, chb10, chb16, chb20 (selective download)
 - **Sampling rate**: 256 Hz
 - **Recording duration per file**: 1 hour (3600 seconds)
-- **Total EDF files downloaded**: 119 (chb01: 42, chb03: 38, chb05: 39)
-- **Channel montage**: Bipolar 10-20 system (17–18 channels per patient after deduplication)
-- **Annotated EEG files with seizures**: 19 files across 3 patients
+- **Total EDF files downloaded**: 190 (chb01: 42, chb03: 38, chb05: 39, chb06: 15, chb08: 13, chb10: 15, chb16: 14, chb20: 14)
+- **Channel montage**: Bipolar 10-20 system (17 channels after deduplication)
+- **Annotated EEG files with seizures**: 59 files across 8 patients
   - chb01: 7 seizure files
   - chb03: 7 seizure files
   - chb05: 5 seizure files
@@ -186,15 +186,24 @@ FZ-CZ, CZ-PZ
 
 ### 3.6 Processed Dataset Statistics
 
-| Patient | Total Epochs | Interictal | Preictal | Feature Shape | Sequence Shape |
-|---------|-------------|------------|----------|---------------|----------------|
-| chb01 | 95,699 | 86,837 | 8,862 | (95699, 221) | (95699, 1280, 17) |
-| chb03 | 87,780 | 80,519 | 7,261 | (87780, 221) | (87780, 1280, 17) |
-| chb05 | 49,919 | 47,107 | 2,812 | (49919, 221) | (49919, 1280, 17) |
-| **Total** | **233,398** | **214,463** | **18,935** | — | — |
+| Patient | Total Epochs | Interictal | Preictal | Download type |
+|---------|-------------|------------|----------|---------------|
+| chb01 | 95,699 | 86,837 | 8,862 | Full (42 files) |
+| chb03 | 87,780 | 80,519 | 7,261 | Full (38 files) |
+| chb05 | 49,919 | 47,107 | 2,812 | Full (39 files) |
+| chb06 | 17,472 | 16,216 | 1,256 | Selective (15 files) |
+| chb08 | 14,662 | 12,883 | 1,779 | Selective (13 files) |
+| chb10 | 16,642 | 14,839 | 1,803 | Selective (15 files) |
+| chb16 | 17,547 | 15,261 | 2,286 | Selective (13/14 files†) |
+| chb20 | 33,894 | 27,385 | 6,509 | Selective (14 files) |
+| **Total** | **333,615** | **301,047** | **32,568** | — |
 
-**Overall class imbalance ratio (interictal : preictal): ~11.3 : 1**  
-Positive class weighting will be applied during model training to compensate.
+†chb16_18.edf (18 channels) dropped by channel harmonisation; all others have 17 channels.
+
+**Overall class imbalance ratio (interictal : preictal): ~9.2 : 1**  
+Positive class weighting applied during model training to compensate.
+
+**Channel harmonisation fix**: `process_patient()` now detects mixed channel counts across files within a patient, keeps the dominant count (17), and drops outlier-channel-count files before concatenation. Triggered on chb16.
 
 ---
 
@@ -273,15 +282,18 @@ Since CHB-MIT provides no real genetic data, profiles are simulated using:
 - Cohort-level standardisation applied: PRS_std = (PRS − μ) / σ
 - Simulated PRS distribution (10,000 simulations): mean=0.0, SD=1.0, range=[−3.14, +4.11]
 
-**Simulated genetic profiles (current 5 patients):**
+**Simulated genetic profiles (8 patients used for training):**
 
 | Patient | SCN1A | SCN8A | KCNQ2 | SCN2A | KCNT1 | DEPDC5 | PCDH19 | GRIN2A | GABRA1 | SCN1A_pLI | SCN8A_pLI | PRS |
 |---------|-------|-------|-------|-------|-------|--------|--------|--------|--------|-----------|-----------|-----|
 | chb01 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 1.0 | 1.0 | +1.023 |
-| chb02 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 1.0 | 1.0 | −1.669 |
 | chb03 | 1 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 1.0 | 1.0 | +0.339 |
-| chb04 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 1.0 | 1.0 | +0.215 |
 | chb05 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 1.0 | 1.0 | +0.092 |
+| chb06 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 1.0 | 1.0 | +1.006 |
+| chb08 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 1.0 | 1.0 | — |
+| chb10 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 1.0 | 1.0 | — |
+| chb16 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 1.0 | 1.0 | — |
+| chb20 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 1.0 | 1.0 | — |
 
 ---
 
@@ -356,11 +368,16 @@ Since CHB-MIT provides no real genetic data, profiles are simulated using:
 
 **Implementation**: `src/models/ctgan_synthetic.py`
 
-**Input data construction**: Per-EDF-file summaries built from the 233,398 processed epochs:
-- For each of 119 EDF files: mean and std of 13 feature types (averaged across 17 channels) → 26 EEG columns
+**Input data construction**: Per-EDF-file summaries built from the 333,615 processed epochs:
+- For each of **190 EDF files** across 8 patients: mean and std of 13 feature types (averaged across 17 channels) → 26 EEG columns
 - 12 genetic profile columns (attached by patient ID)
 - 1 preictal ratio, 1 epoch count, 1 seizure label → 3 meta columns
-- **Total**: 119 rows × 41 training columns (2 metadata columns dropped before training)
+- **Total**: 190 rows × 41 training columns (2 metadata columns dropped before training)
+
+**v2 preprocessing (critical fixes):**
+- Log10-transform applied to band power, variance, and hjorth_activity columns before CTGAN training (values ~1e-10 were lost as 0.0 in CSV)
+- StandardScaler applied to all continuous columns before fit
+- Inverse transforms (inverse-scale → 10^x) applied after synthetic generation
 
 | Parameter | Value |
 |-----------|-------|
@@ -381,17 +398,19 @@ Since CHB-MIT provides no real genetic data, profiles are simulated using:
 - n_valid_epochs clipped ≥ 100 and rounded to integer
 - If all 9 mutation flags = 0 AND PRS < −1 → has_seizure forced to 0 (low genetic risk)
 
-**Actual validation results (300 epochs, 1000 synthetic samples):**
+**Validation results — v2 (300 epochs, 1000 synthetic samples, 8 patients):**
 
-| Metric | Value |
-|--------|-------|
-| KS test pass rate (p > 0.05) | 3/31 (9.7%) |
-| Mean correlation difference | 0.4044 |
-| Seizure ratio (real → synthetic) | 16.0% → 17.9% |
-| SCN1A mutation rate (real → syn) | 31.9% → 39.1% |
-| Other mutation rates | 0% → 0% (correctly learned) |
+| Metric | v1 (3 patients) | v2 (8 patients) |
+|--------|-----------------|------------------|
+| Training rows | 119 | 190 |
+| KS test pass rate | 3/31 (9.7%) | 4/31 (12.9%) |
+| Mean correlation difference | 0.4044 | 0.3583 |
+| Seizure ratio (real → syn) | 16.0% → 17.9% | 26.3% → 29.2% |
+| Mode collapse | Present (std≈0) | Fixed (std ratios 1.01–1.12) |
+| Band power learning | Zero (precision loss) | Correct magnitude (~1e-10) |
+| SCN1A mutation rate | 31.9% → 39.1% | 20.0% → 22.1% |
 
-*Note: Low KS pass rate is expected with 119 real rows vs 1000 synthetic — the test has high power to detect small differences. The seizure ratio and genetic distributions are well-preserved.*
+*Note: KS pass rate remains low due to fundamental sample size limitation (190 real rows). Mode collapse and band power issues from v1 are fully resolved.*
 
 ---
 
