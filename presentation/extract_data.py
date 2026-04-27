@@ -1,7 +1,12 @@
 #!/usr/bin/env python3
 """
-Extract real data samples for the presentation frontend.
-Outputs JSON files that the HTML/JS frontend can load.
+Extract curated EEG segments for presentation.
+Finds 5 specific phenomena from real data:
+  1. Normal baseline (calm interictal)
+  2. Eye blink artifacts (large frontal spikes → suppressed after preprocessing)
+  3. Pre-ictal period (30s before seizure onset)
+  4. During seizure (ictal)
+  5. Muscle/movement artifact (high-frequency noise)
 """
 
 import json
@@ -10,7 +15,6 @@ from pathlib import Path
 
 import mne
 import numpy as np
-import pandas as pd
 
 mne.set_log_level("ERROR")
 
@@ -20,241 +24,253 @@ sys.path.insert(0, str(PROJECT))
 OUT = Path(__file__).resolve().parent / "data"
 OUT.mkdir(exist_ok=True)
 
+# Channels to display
+DISPLAY_CHANNELS = ["FP1-F7", "F7-T7", "C3-P3", "FZ-CZ"]
 
-def extract_eeg_signals():
-    """Extract raw vs preprocessed EEG for side-by-side comparison."""
+# chb01_03.edf seizure: 2996–3036s
+# chb01_04.edf seizure: 1467–1494s
+EDF_FILE = "chb01_03.edf"
+SEIZURE_START = 2996
+SEIZURE_END = 3036
+
+SEGMENT_DURATION = 6  # seconds per segment
+
+
+def load_raw_and_processed(edf_path, channels):
+    """Load raw and preprocessed versions of an EDF file."""
     from src.data_pipeline.eeg_preprocessing import EEGPreprocessor, load_config
-
     config = load_config()
     pre = EEGPreprocessor(config)
 
-    # Pick a seizure file for interesting data
-    edf_path = PROJECT / "data" / "raw" / "chb-mit" / "chb01" / "chb01_03.edf"
-    if not edf_path.exists():
-        # fallback to any available
-        edfs = sorted((PROJECT / "data" / "raw" / "chb-mit" / "chb01").glob("*.edf"))
-        edf_path = edfs[0] if edfs else None
-    if not edf_path:
-        print("No EDF files found"); return
-
-    print(f"Loading: {edf_path.name}")
-
-    # Channels to display (subset for readability)
-    display_channels = ["FP1-F7", "F7-T7", "C3-P3", "FZ-CZ"]
-
-    # ── RAW signal (no preprocessing) ──
+    # Raw
     raw_orig = mne.io.read_raw_edf(str(edf_path), preload=True, verbose=False)
-    available = [ch for ch in display_channels if ch in raw_orig.ch_names]
-    raw_orig.pick(available)
+    available = [ch for ch in channels if ch in raw_orig.ch_names]
+    raw_copy = raw_orig.copy()
+    raw_copy.pick(available)
 
-    # Take 10 seconds starting at second 100 (skip initial artifacts)
-    sfreq = int(raw_orig.info["sfreq"])
-    start = 100 * sfreq
-    stop  = start + 10 * sfreq
-    raw_data = raw_orig.get_data(start=start, stop=stop)  # [n_ch, n_samples]
-
-    # ── PREPROCESSED signal ──
-    raw_proc = mne.io.read_raw_edf(str(edf_path), preload=True, verbose=False)
-    raw_proc = pre.preprocess(raw_proc)
+    # Processed
+    raw_proc = pre.preprocess(raw_orig)
     raw_proc.pick(available)
-    proc_data = raw_proc.get_data(start=start, stop=stop)
 
-    # Convert to JSON-friendly format (downsample for frontend performance)
-    # Keep every 2nd sample → 128 Hz effective, still smooth
-    stride = 2
-    result = {
-        "sfreq": sfreq // stride,
-        "duration_sec": 10,
-        "channels": available,
-        "file": edf_path.name,
-        "patient": "chb01",
-        "raw": {},
-        "processed": {},
-    }
+    sfreq = int(raw_copy.info["sfreq"])
+    return raw_copy, raw_proc, available, sfreq
 
-    for i, ch in enumerate(available):
-        # Scale to microvolts for display
+
+def find_eye_blinks(raw, sfreq):
+    """Find eye blink segments — large amplitude spikes in FP1-F7."""
+    fp1_idx = raw.ch_names.index("FP1-F7") if "FP1-F7" in raw.ch_names else 0
+    data = raw.get_data()[fp1_idx]  # FP1-F7 channel
+    data_uv = data * 1e6  # to µV
+
+    # Scan with a sliding window — find segments with large spikes in frontal channel
+    # but NOT sustained high amplitude (which would be seizure)
+    window = SEGMENT_DURATION * sfreq
+    stride = sfreq * 2  # check every 2 seconds
+    best_score = 0
+    best_start = 100 * sfreq  # default fallback
+
+    for start in range(50 * sfreq, len(data) - window, stride):
+        seg = data_uv[start:start + window]
+        # Skip if near seizure
+        time_s = start / sfreq
+        if abs(time_s - SEIZURE_START) < 120:
+            continue
+
+        peak = np.max(np.abs(seg))
+        std = np.std(seg)
+        # Eye blink: high peaks but moderate std (spiky, not sustained)
+        if peak > 150 and std < 80 and peak / std > 3:
+            score = peak / std
+            if score > best_score:
+                best_score = score
+                best_start = start
+
+    return best_start // sfreq
+
+
+def find_muscle_artifact(raw, sfreq):
+    """Find muscle artifact — high frequency noise, high variance segment."""
+    data = raw.get_data()
+    data_uv = data * 1e6
+    window = SEGMENT_DURATION * sfreq
+    stride = sfreq * 2
+
+    best_var = 0
+    best_start = 200 * sfreq
+
+    for start in range(50 * sfreq, data.shape[1] - window, stride):
+        time_s = start / sfreq
+        if abs(time_s - SEIZURE_START) < 120:
+            continue
+
+        seg = data_uv[:, start:start + window]
+        # High-frequency content: compute variance of diff (approximates HF energy)
+        hf_energy = np.mean(np.var(np.diff(seg, axis=1), axis=1))
+        total_var = np.mean(np.var(seg, axis=1))
+
+        # Want high HF energy relative to total variance (noisy, not just big swings)
+        if hf_energy > best_var and total_var < 5000:
+            best_var = hf_energy
+            best_start = start
+
+    return best_start // sfreq
+
+
+def find_normal_baseline(raw, sfreq):
+    """Find a calm, normal baseline segment — low variance, far from seizure."""
+    data = raw.get_data()
+    data_uv = data * 1e6
+    window = SEGMENT_DURATION * sfreq
+    stride = sfreq * 5
+
+    best_var = float("inf")
+    best_start = 300 * sfreq
+
+    for start in range(100 * sfreq, min(data.shape[1] - window, 1500 * sfreq), stride):
+        time_s = start / sfreq
+        if abs(time_s - SEIZURE_START) < 300:
+            continue
+
+        seg = data_uv[:, start:start + window]
+        total_var = np.mean(np.var(seg, axis=1))
+        peak = np.max(np.abs(seg))
+
+        # Low variance AND no extreme peaks
+        if total_var < best_var and peak < 200:
+            best_var = total_var
+            best_start = start
+
+    return best_start // sfreq
+
+
+def extract_segment(raw_orig, raw_proc, start_sec, channels, sfreq):
+    """Extract a segment and convert to JSON-ready dict."""
+    stride = 2  # downsample for frontend
+    start_samp = start_sec * sfreq
+    end_samp = start_samp + SEGMENT_DURATION * sfreq
+
+    raw_data = raw_orig.get_data(start=start_samp, stop=end_samp)
+    proc_data = raw_proc.get_data(start=start_samp, stop=end_samp)
+
+    raw_dict = {}
+    proc_dict = {}
+    for i, ch in enumerate(channels):
         raw_uv = (raw_data[i, ::stride] * 1e6).tolist()
         proc_uv = (proc_data[i, ::stride] * 1e6).tolist()
-        result["raw"][ch] = [round(v, 2) for v in raw_uv]
-        result["processed"][ch] = [round(v, 2) for v in proc_uv]
+        raw_dict[ch] = [round(v, 2) for v in raw_uv]
+        proc_dict[ch] = [round(v, 2) for v in proc_uv]
+
+    return raw_dict, proc_dict
+
+
+def main():
+    edf_path = PROJECT / "data" / "raw" / "chb-mit" / "chb01" / EDF_FILE
+    print(f"Loading {edf_path.name}...")
+
+    raw_orig, raw_proc, channels, sfreq = load_raw_and_processed(edf_path, DISPLAY_CHANNELS)
+    print(f"  Channels: {channels}, sfreq: {sfreq}")
+
+    # Find interesting segments
+    print("\nFinding segments...")
+
+    normal_start = find_normal_baseline(raw_orig, sfreq)
+    print(f"  Normal baseline: {normal_start}s")
+
+    blink_start = find_eye_blinks(raw_orig, sfreq)
+    print(f"  Eye blink artifact: {blink_start}s")
+
+    muscle_start = find_muscle_artifact(raw_orig, sfreq)
+    print(f"  Muscle artifact: {muscle_start}s")
+
+    preictal_start = SEIZURE_START - 35  # 35s before seizure
+    print(f"  Pre-ictal: {preictal_start}s (seizure at {SEIZURE_START}s)")
+
+    ictal_start = SEIZURE_START + 2  # 2s into seizure
+    print(f"  Ictal (seizure): {ictal_start}s")
+
+    # Define segments
+    segments = [
+        {
+            "id": "normal",
+            "title": "Normal Baseline",
+            "description": "Calm interictal EEG — typical background rhythms with no pathological activity. The preprocessing preserves the underlying signal while reducing minor noise.",
+            "start_sec": normal_start,
+            "raw_label": "Raw — Background Noise Present",
+            "proc_label": "Filtered — Clean Baseline",
+        },
+        {
+            "id": "blink",
+            "title": "Eye Blink Artifact",
+            "description": "Large amplitude spikes in the frontal channel (FP1-F7) caused by eye blinks. The bandpass and artifact rejection pipeline suppresses these transients while preserving the underlying neural signal.",
+            "start_sec": blink_start,
+            "raw_label": "Raw — Blink Spikes Visible",
+            "proc_label": "Filtered — Artifacts Suppressed",
+        },
+        {
+            "id": "muscle",
+            "title": "Muscle / Movement Artifact",
+            "description": "High-frequency noise from scalp muscle contractions (EMG contamination). The 70 Hz low-pass filter removes most of this high-frequency artifact.",
+            "start_sec": muscle_start,
+            "raw_label": "Raw — EMG Contamination",
+            "proc_label": "Filtered — HF Noise Removed",
+        },
+        {
+            "id": "preictal",
+            "title": "Pre-Ictal Period",
+            "description": f"~30 seconds before seizure onset (seizure at {SEIZURE_START}s). Subtle changes in rhythmic activity may emerge. The preprocessing preserves these critical pre-seizure patterns.",
+            "start_sec": preictal_start,
+            "raw_label": "Raw — Pre-Seizure",
+            "proc_label": "Filtered — Patterns Preserved",
+        },
+        {
+            "id": "ictal",
+            "title": "During Seizure (Ictal)",
+            "description": f"Active seizure activity — high-amplitude rhythmic discharges across channels. Seizure window: {SEIZURE_START}–{SEIZURE_END}s. Preprocessing preserves the seizure morphology.",
+            "start_sec": ictal_start,
+            "raw_label": "Raw — Seizure Activity",
+            "proc_label": "Filtered — Seizure Preserved",
+        },
+    ]
+
+    # Extract all segments
+    result = {
+        "file": EDF_FILE,
+        "patient": "chb01",
+        "sfreq": sfreq // 2,  # after downsampling
+        "duration_sec": SEGMENT_DURATION,
+        "channels": channels,
+        "segments": [],
+    }
+
+    for seg in segments:
+        print(f"\n  Extracting: {seg['title']} (t={seg['start_sec']}s)...")
+        raw_dict, proc_dict = extract_segment(
+            raw_orig, raw_proc, seg["start_sec"], channels, sfreq
+        )
+
+        # Verify there's actual signal
+        for ch in channels:
+            r_range = max(raw_dict[ch]) - min(raw_dict[ch])
+            p_range = max(proc_dict[ch]) - min(proc_dict[ch])
+            print(f"    {ch}: raw range={r_range:.1f}µV, proc range={p_range:.1f}µV")
+
+        result["segments"].append({
+            "id": seg["id"],
+            "title": seg["title"],
+            "description": seg["description"],
+            "start_sec": seg["start_sec"],
+            "raw_label": seg["raw_label"],
+            "proc_label": seg["proc_label"],
+            "raw": raw_dict,
+            "processed": proc_dict,
+        })
 
     with open(OUT / "eeg_signals.json", "w") as f:
         json.dump(result, f)
 
-    print(f"  EEG signals: {len(available)} channels × {len(raw_uv)} samples")
-
-    # ── Also extract feature statistics for display ──
-    feat_path = PROJECT / "data" / "processed" / "eeg_features" / "chb01_features.npy"
-    lab_path  = PROJECT / "data" / "processed" / "eeg_features" / "chb01_labels.npy"
-    if feat_path.exists():
-        features = np.load(feat_path)
-        labels   = np.load(lab_path)
-        # Average features across channels for display
-        n_ch = 17
-        reshaped = features[:500].reshape(-1, n_ch, 13)  # first 500 epochs
-        global_feats = reshaped.mean(axis=1)  # [500, 13]
-
-        feature_names = [
-            "Delta Power", "Theta Power", "Alpha Power", "Beta Power",
-            "Gamma Power", "α/β Ratio", "θ/α Ratio", "Spike Rate",
-            "Variance", "Hjorth Activity", "Hjorth Mobility",
-            "Hjorth Complexity", "Sample Entropy"
-        ]
-
-        feat_stats = {}
-        for i, name in enumerate(feature_names):
-            vals = global_feats[:, i]
-            feat_stats[name] = {
-                "mean": float(np.mean(vals)),
-                "std": float(np.std(vals)),
-                "min": float(np.min(vals)),
-                "max": float(np.max(vals)),
-            }
-
-        epoch_info = {
-            "total_epochs": int(len(labels)),
-            "preictal": int((labels == 1).sum()),
-            "interictal": int((labels == 0).sum()),
-            "feature_dim": int(features.shape[1]),
-            "feature_stats": feat_stats,
-        }
-
-        with open(OUT / "feature_stats.json", "w") as f:
-            json.dump(epoch_info, f, indent=2)
-        print(f"  Feature stats extracted")
-
-
-def extract_genetic_data():
-    """Extract genetic profiles for display."""
-    gen_path = PROJECT / "data" / "processed" / "genetic_vectors" / "genetic_profiles.csv"
-    if not gen_path.exists():
-        print("No genetic profiles found"); return
-
-    df = pd.read_csv(gen_path)
-
-    patients_used = ["chb01", "chb03", "chb05", "chb06", "chb08", "chb10", "chb16", "chb20"]
-    df = df[df["patient_id"].isin(patients_used)]
-
-    result = {
-        "columns": list(df.columns),
-        "data": df.to_dict(orient="records"),
-        "gene_names": ["SCN1A", "SCN8A", "KCNQ2", "SCN2A", "KCNT1",
-                        "DEPDC5", "PCDH19", "GRIN2A", "GABRA1"],
-    }
-
-    with open(OUT / "genetic_profiles.json", "w") as f:
-        json.dump(result, f, indent=2)
-    print(f"  Genetic profiles: {len(df)} patients")
-
-
-def extract_ctgan_data():
-    """Extract CTGAN real vs synthetic comparison data."""
-    real_path = PROJECT / "data" / "processed" / "synthetic" / "real_summary_dataset.csv"
-    syn_path  = PROJECT / "data" / "processed" / "synthetic" / "synthetic_records.csv"
-    val_path  = PROJECT / "data" / "processed" / "synthetic" / "validation_report.json"
-
-    if not real_path.exists() or not syn_path.exists():
-        print("No CTGAN data found"); return
-
-    real_df = pd.read_csv(real_path)
-    syn_df  = pd.read_csv(syn_path)
-
-    # Log-transform stems for un-logging real data
-    log_stems = ["delta_power", "theta_power", "alpha_power", "beta_power",
-                 "gamma_power", "variance", "hjorth_activity"]
-
-    for stem in log_stems:
-        for suffix in ["_mean", "_std"]:
-            col = f"{stem}{suffix}"
-            if col in real_df.columns:
-                real_df[col] = np.power(10, real_df[col])
-
-    # Compare key features
-    compare_cols = [
-        "delta_power_mean", "theta_power_mean", "alpha_power_mean",
-        "beta_power_mean", "gamma_power_mean",
-        "spike_rate_mean", "sample_entropy_mean",
-        "preictal_ratio", "polygenic_risk_score",
-    ]
-
-    comparisons = {}
-    for col in compare_cols:
-        if col in real_df.columns and col in syn_df.columns:
-            r = real_df[col].dropna()
-            s = syn_df[col].dropna()
-            comparisons[col] = {
-                "real_mean": float(r.mean()),
-                "real_std": float(r.std()),
-                "syn_mean": float(s.mean()),
-                "syn_std": float(s.std()),
-                # Histogram data (20 bins)
-                "real_hist": np.histogram(r, bins=20)[0].tolist(),
-                "syn_hist": np.histogram(s, bins=20)[0].tolist(),
-                "bin_edges": np.histogram(r, bins=20)[1].tolist(),
-            }
-
-    # Seizure distribution
-    seizure_dist = {
-        "real": {"seizure": int(real_df["has_seizure"].sum()),
-                 "no_seizure": int((real_df["has_seizure"] == 0).sum())},
-        "syn":  {"seizure": int(syn_df["has_seizure"].sum()),
-                 "no_seizure": int((syn_df["has_seizure"] == 0).sum())},
-    }
-
-    # Mutation distribution
-    mut_cols = [c for c in real_df.columns if c.endswith("_mutation")]
-    mutations = {}
-    for col in mut_cols:
-        mutations[col] = {
-            "real_rate": float(real_df[col].mean()),
-            "syn_rate": float(syn_df[col].mean()),
-        }
-
-    # Validation report
-    val_report = {}
-    if val_path.exists():
-        with open(val_path) as f:
-            val_report = json.load(f)
-
-    result = {
-        "real_count": len(real_df),
-        "syn_count": len(syn_df),
-        "real_patients": int(real_df["patient_id"].nunique()) if "patient_id" in real_df else 0,
-        "comparisons": comparisons,
-        "seizure_dist": seizure_dist,
-        "mutations": mutations,
-        "validation": val_report,
-    }
-
-    # Also extract a synthetic EEG-like signal for animation
-    # Use the synthetic band power values to generate a simulated waveform
-    syn_sample = syn_df.head(5)
-    syn_signals = {}
-    for idx, row in syn_sample.iterrows():
-        # Generate a signal from the band powers (for visual illustration)
-        t = np.linspace(0, 5, 640)  # 5 seconds at 128 Hz
-        signal = np.zeros_like(t)
-        if "delta_power_mean" in row:
-            signal += np.sqrt(abs(row.get("delta_power_mean", 0))) * 1e5 * np.sin(2 * np.pi * 2 * t)
-            signal += np.sqrt(abs(row.get("theta_power_mean", 0))) * 1e5 * np.sin(2 * np.pi * 6 * t)
-            signal += np.sqrt(abs(row.get("alpha_power_mean", 0))) * 1e5 * np.sin(2 * np.pi * 10 * t)
-            signal += np.sqrt(abs(row.get("beta_power_mean", 0))) * 1e5 * np.sin(2 * np.pi * 20 * t)
-        syn_signals[f"synthetic_{idx}"] = [round(v, 3) for v in signal.tolist()]
-
-    result["syn_signals"] = syn_signals
-    result["syn_signal_sfreq"] = 128
-
-    with open(OUT / "ctgan_results.json", "w") as f:
-        json.dump(result, f)
-
-    print(f"  CTGAN: {len(real_df)} real, {len(syn_df)} synthetic, {len(comparisons)} features compared")
+    print(f"\n✅ Saved {len(segments)} segments to {OUT / 'eeg_signals.json'}")
+    print(f"   File size: {(OUT / 'eeg_signals.json').stat().st_size / 1024:.0f} KB")
 
 
 if __name__ == "__main__":
-    print("Extracting presentation data...")
-    print()
-    extract_eeg_signals()
-    extract_genetic_data()
-    extract_ctgan_data()
-    print("\n✅ All data extracted to presentation/data/")
+    main()

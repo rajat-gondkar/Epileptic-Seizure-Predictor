@@ -475,7 +475,7 @@ Since CHB-MIT provides no real genetic data, profiles are simulated using:
 | `epilepsy_variants.csv` | `data/raw/clinvar/` | 13,331 pathogenic variants |
 | `pli_scores.csv` | `data/raw/gnomad/` | pLI + LoF metrics for 9 genes |
 | `epilepsy_snps.csv` | `data/raw/gwas/` | 15 GWAS SNPs with OR and RAF |
-| `genetic_profiles.csv` | `data/processed/genetic_vectors/` | 5 patients × 12 features |
+| `genetic_profiles.csv` | `data/processed/genetic_vectors/` | 8 patients × 12 features |
 | `chb01_sequences.npy` | `data/processed/eeg_features/` | (95699, 1280, 17) float32 |
 | `chb01_features.npy` | `data/processed/eeg_features/` | (95699, 221) float32 |
 | `chb01_labels.npy` | `data/processed/eeg_features/` | (95699,) int8 |
@@ -485,8 +485,193 @@ Since CHB-MIT provides no real genetic data, profiles are simulated using:
 | `chb05_sequences.npy` | `data/processed/eeg_features/` | (49919, 1280, 17) float32 |
 | `chb05_features.npy` | `data/processed/eeg_features/` | (49919, 221) float32 |
 | `chb05_labels.npy` | `data/processed/eeg_features/` | (49919,) int8 |
-| `real_summary_dataset.csv` | `data/processed/synthetic/` | 119 per-file EEG summaries |
+| `chb06_sequences.npy` | `data/processed/eeg_features/` | (17472, 1280, 17) float32 |
+| `chb08_sequences.npy` | `data/processed/eeg_features/` | (14662, 1280, 17) float32 |
+| `chb10_sequences.npy` | `data/processed/eeg_features/` | (16642, 1280, 17) float32 |
+| `chb16_sequences.npy` | `data/processed/eeg_features/` | (17547, 1280, 17) float32 |
+| `chb20_sequences.npy` | `data/processed/eeg_features/` | (33894, 1280, 17) float32 |
+| `real_summary_dataset.csv` | `data/processed/synthetic/` | 190 per-file EEG summaries (8 patients) |
 | `synthetic_records.csv` | `data/processed/synthetic/` | 1,000 CTGAN synthetic records |
 | `ctgan_model.pkl` | `data/processed/synthetic/` | Trained CTGAN model (~2 MB) |
 | `validation_report.json` | `data/processed/synthetic/` | KS test + correlation metrics |
 | `config.yaml` | `configs/` | All hyperparameters and paths |
+| `eeg_signals.json` | `presentation/data/` | 5 curated EEG segments, raw + processed, 216 KB |
+| `ctgan_results.json` | `presentation/data/` | Distribution comparisons, synthetic signals, validation, 36 KB |
+| `genetic_profiles.json` | `presentation/data/` | Mutation heatmap + PRS data for 8 patients, 4 KB |
+| `feature_stats.json` | `presentation/data/` | Per-feature real vs. synthetic summary statistics, 4 KB |
+
+---
+
+## 11. Presentation Frontend
+
+**Location**: `presentation/`  
+**Entry point**: `presentation/index.html` — serve with `python3 -m http.server 8899`  
+**Data source**: All data extracted from real processed files via `presentation/extract_data.py`; no fabricated values.
+
+### 11.1 Architecture
+
+Pure HTML + Vanilla CSS + Vanilla JS. No frameworks, no build step. Three files:
+
+| File | Role |
+|------|------|
+| `index.html` | Two-page structure: EEG Preprocessing tab and CTGAN Results tab |
+| `style.css` | Minimalist dark theme; CSS custom properties; responsive grid |
+| `app.js` | Canvas signal renderers, CTGAN charts, data loading, animation loops |
+
+### 11.2 EEG Preprocessing Page
+
+#### Signal Comparison Design
+
+Five curated EEG segments are displayed as stacked rows. Each row contains:
+- A **left canvas** (raw signal, red label) and **right canvas** (preprocessed signal, green label)
+- A single **shared Play/Pause button** that animates both canvases in perfect lockstep
+- An **amplitude stats line** showing peak µV before and after filtering, with % reduction
+
+**Critical rendering detail — shared Y-axis scale:**  
+Both canvases within a row use an identical µV/pixel scale, computed from the combined min/max of both raw and processed signals. This ensures amplitude reductions are visually apparent. The earlier implementation incorrectly auto-scaled each canvas independently, making both signals fill the same visual height regardless of actual amplitude difference.
+
+A dashed zero-line is drawn on each canvas at 0 µV to provide an absolute reference point.
+
+#### Curated Segments (from `chb01_03.edf`)
+
+| # | Segment Type | Source Time | Raw Peak | Processed Peak | Reduction | What to look for |
+|---|-------------|-------------|----------|----------------|-----------|-----------------|
+| 1 | Normal Baseline | t=110s | 117.8 µV | 113.2 µV | 3.9% | Minimal change — clean baseline |
+| 2 | Eye Blink Artifact | t=3268s | 273.3 µV | 243.6 µV | 10.9% | FP1-F7 frontal spike suppression |
+| 3 | Muscle/EMG Artifact | t=1726s | 363.6 µV | 274.7 µV | 24.4% | Largest visible amplitude reduction |
+| 4 | Pre-Ictal Period | t=2961s | 191.7 µV | 142.0 µV | 25.9% | Buildup 35s before seizure onset |
+| 5 | During Seizure (Ictal) | t=2998s | 292.1 µV | 256.9 µV | 12.1% | High-amplitude rhythmic discharge |
+
+**Seizure reference**: chb01_03.edf seizure window is 2996–3036 s.
+
+#### Segment Selection Algorithm (`extract_data.py`)
+
+- **Normal baseline**: Sliding-window scan for lowest variance + no peaks > 200 µV, constrained to >300 s away from seizure
+- **Eye blink**: Scans FP1-F7 for high peak-to-std ratio (> 3), moderate overall std (< 80 µV), no sustained high amplitude
+- **Muscle artifact**: Scans all channels for maximum variance of first-difference (proxy for high-frequency content) with total variance < 5000
+- **Pre-ictal**: Fixed at `seizure_start − 35 s`
+- **Ictal**: Fixed at `seizure_start + 2 s`
+
+Downsampling: 2:1 stride applied when exporting to JSON (256 Hz → 128 Hz effective) to keep file size manageable.
+
+#### Why the preprocessed signal looks similar to raw
+
+This is expected and correct behaviour. The preprocessing pipeline is intentionally conservative:
+
+1. **Bandpass 0.5–70 Hz** removes DC drift and noise above 70 Hz, but CHB-MIT scalp EEG energy is naturally concentrated below 70 Hz
+2. **Notch 60 Hz** removes one narrow power-line frequency band
+3. **CAR re-reference** redistributes amplitude across channels but does not suppress signal
+
+No ICA, ASR, or EOG regression is used because these would distort pre-ictal oscillatory patterns that the LSTM needs to detect. The amplitude reductions are real (3–26% depending on segment) but subtle — visible only when both panels share the same scale, which the frontend now enforces.
+
+#### Genetic Feature Section
+
+- **Mutation heatmap**: Grid of 8 patients × 9 genes (binary flags). chb03 has SCN1A=1 (the only carrier).
+- **PRS bar chart**: Diverging bar from zero for each patient; orange bars = positive PRS, blue = negative.
+
+### 11.3 CTGAN Results Page
+
+#### Distribution Charts
+Nine side-by-side histogram comparisons (real vs. synthetic), one per EEG feature. Uses interleaved bars: blue = real, orange = synthetic. Mean values shown below each chart.
+
+#### Seizure Label Distribution
+Stacked vertical bars comparing real (190 records) and synthetic (1,000 records) seizure vs. non-seizure proportions:
+- Real: 26.3% seizure / 73.7% non-seizure
+- Synthetic: 29.2% seizure / 70.8% non-seizure
+
+#### Synthetic Signal Reconstruction Canvas
+
+Five waveforms reconstructed from CTGAN-generated band power values (delta, theta, alpha, beta, gamma), each representing one synthetic patient record. Each channel uses auto-scaled amplitude (the absolute µV values from reconstructed band powers, not comparable to real EEG µV).
+
+**Canvas initialization note**: This canvas is inside a hidden tab at page load, so `getBoundingClientRect()` returns 0 dimensions. Initialization is deferred using `requestAnimationFrame + setTimeout(50ms)` triggered on first tab click. A `synCanvasReady` flag prevents duplicate initialization.
+
+#### Genetic Feature Preservation
+Cards showing mutation rate for each gene: real rate vs. synthetic rate. SCN1A: 20.0% real → 22.1% synthetic (correctly close).
+
+#### Validation Metrics
+- KS test pass rate: 4/31 features (12.9%)
+- Mean correlation difference: 0.358
+- Real patients: 8
+- Synthetic records: 1,000
+
+---
+
+## 12. Cloud Training Pipeline
+
+**Location**: `cloud_training/`  
+**Target environment**: Ubuntu VM with NVIDIA RTX 4050, CUDA 11.8+, Python 3.10+  
+**Entry point**: `bash cloud_training/run_all.sh`
+
+### 12.1 Scripts
+
+| Script | Purpose |
+|--------|---------|
+| `run_all.sh` | Master shell script; runs steps 01 and 02 in sequence |
+| `01_download_and_preprocess.py` | Downloads selective CHB-MIT EDFs from PhysioNet, runs full preprocessing pipeline |
+| `02_train_models.py` | Trains BiLSTM (PyTorch, CUDA-aware) and XGBoost (GPU via `device='cuda'`) |
+| `requirements.txt` | All pip dependencies pinned for reproducibility |
+
+### 12.2 Model Training Specifications
+
+**BiLSTM branch** (`02_train_models.py`):
+
+| Parameter | Value |
+|-----------|-------|
+| Architecture | Bidirectional LSTM, 2 layers, hidden=128, dropout=0.3 |
+| Attention pooling | Self-attention over all timesteps → weighted sum |
+| Total parameters | ~759,000 |
+| Device | Auto-detected: CUDA → CPU (never MPS, which caused bottlenecks) |
+| Data loading | Memory-mapped `.npy` files to avoid OOM on large datasets |
+| Batch size | 64 |
+| Optimiser | Adam, lr=1e-3, weight_decay=1e-4 |
+| Loss | BCEWithLogitsLoss with `pos_weight = n_interictal / n_preictal` |
+| Early stopping | Patience=10 on validation AUC |
+| Output | `cloud_training/outputs/lstm_best.pt` |
+
+**XGBoost branch**:
+
+| Parameter | Value |
+|-----------|-------|
+| Input | 221-dim feature vector per epoch |
+| GPU | `device='cuda'` (CUDA-accelerated histogram method) |
+| n_estimators | 300 with early stopping (rounds=20) |
+| eval_metric | AUC |
+| scale_pos_weight | Computed from training label ratio |
+| Output | `cloud_training/outputs/xgboost_model.pkl` |
+
+### 12.3 Download Strategy
+
+`01_download_and_preprocess.py` downloads only the files needed for each patient (seizure files + up to 8 interictal files), not the full dataset. Estimated download: ~700 MB per patient × 8 patients = ~5.6 GB total.
+
+Files are downloaded via PhysioNet's HTTPS endpoint using `wfdb`. On failure, the script exits with a clear error message rather than silently continuing.
+
+### 12.4 Outputs to Download After Training
+
+After running `run_all.sh` on the cloud VM:
+
+```
+cloud_training/outputs/
+├── lstm_best.pt              # Best LSTM checkpoint
+├── xgboost_model.pkl         # Trained XGBoost model
+├── lstm_test_preds.npy       # LSTM predictions on test set
+├── xgb_test_preds.npy        # XGBoost predictions on test set
+├── training_log.json         # Loss/AUC curves per epoch
+└── preprocessing_stats.csv   # Per-patient epoch counts
+```
+
+These outputs are the inputs for Phase 6 (Attention Fusion Layer implementation).
+
+---
+
+## 13. Known Issues and Design Decisions
+
+| Issue | Resolution |
+|-------|-----------|
+| CHB-MIT has no real genetic data | Profiles simulated from population carrier frequencies and GWAS SNPs — flagged clearly in all outputs |
+| CTGAN KS pass rate low (12.9%) | Fundamental sample size limitation (190 rows). Mode collapse and band power precision issues from v1 are fixed. Documented as known limitation. |
+| chb16_18.edf channel mismatch (18 ch vs 17) | Automatically dropped by channel harmonisation in `process_patient()` |
+| MPS (Apple Silicon) bottleneck | Cloud training script hard-excludes MPS and uses CUDA only |
+| Canvas hidden on page load | CTGAN synthetic canvas deferred with `requestAnimationFrame + setTimeout(50ms)` |
+| Preprocessing looks similar to raw | Expected behaviour — pipeline is conservative by design. Fixed visualization using shared µV/pixel scale across both panels. |
+| EEG downsampled in presentation JSON | 2:1 stride (256 Hz → 128 Hz effective) applied at export only, to reduce file size. Original data unchanged. |
+

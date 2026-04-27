@@ -114,18 +114,61 @@ section h2 {
     max-width: 700px;
 }
 
-/* ── Signal Comparison Grid ── */
-.comparison-grid {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 1.5rem;
-}
-
-.signal-panel {
+/* ── Segment Row (stacked before/after pairs) ── */
+.segment-row {
     background: var(--surface);
     border: 1px solid var(--border);
     border-radius: var(--radius);
-    padding: 1rem;
+    padding: 1.25rem;
+    margin-bottom: 1.5rem;
+}
+
+.segment-header {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    margin-bottom: 0.5rem;
+}
+
+.segment-badge {
+    background: var(--accent-dim);
+    color: var(--accent);
+    font-size: 0.7rem;
+    font-weight: 600;
+    padding: 0.2rem 0.6rem;
+    border-radius: 4px;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    white-space: nowrap;
+}
+
+.segment-badge.blink { background: var(--red-dim); color: var(--red); }
+.segment-badge.muscle { background: rgba(251, 146, 60, 0.12); color: var(--orange); }
+.segment-badge.preictal { background: rgba(251, 191, 36, 0.12); color: var(--yellow); }
+.segment-badge.ictal { background: var(--red-dim); color: var(--red); }
+
+.segment-title {
+    font-size: 1rem;
+    font-weight: 600;
+}
+
+.segment-desc {
+    font-size: 0.78rem;
+    color: var(--text-muted);
+    margin-bottom: 1rem;
+    line-height: 1.5;
+}
+
+.segment-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 1rem;
+}
+
+.signal-panel {
+    background: var(--bg);
+    border-radius: 6px;
+    padding: 0.75rem;
     overflow: hidden;
 }
 
@@ -133,11 +176,11 @@ section h2 {
     display: flex;
     justify-content: space-between;
     align-items: center;
-    margin-bottom: 0.75rem;
+    margin-bottom: 0.5rem;
 }
 
 .panel-label {
-    font-size: 0.8rem;
+    font-size: 0.72rem;
     font-weight: 600;
     text-transform: uppercase;
     letter-spacing: 0.06em;
@@ -147,7 +190,7 @@ section h2 {
 .proc-label { color: var(--green); }
 
 .panel-meta {
-    font-size: 0.75rem;
+    font-size: 0.68rem;
     color: var(--text-muted);
     font-family: var(--mono);
 }
@@ -163,18 +206,33 @@ canvas {
     height: 250px;
 }
 
-.signal-controls {
+/* Shared play controls for a segment */
+.segment-controls {
     display: flex;
     align-items: center;
+    justify-content: center;
     gap: 0.75rem;
-    margin-top: 0.75rem;
+    margin-top: 1rem;
+    padding-top: 0.75rem;
+    border-top: 1px solid var(--border);
+    flex-wrap: wrap;
 }
+
+.amp-stat {
+    font-size: 0.73rem;
+    color: var(--text-muted);
+    font-family: var(--mono);
+}
+
+.amp-raw  { color: var(--red); }
+.amp-proc { color: var(--green); }
+.amp-pct  { color: var(--yellow); font-weight: 500; }
 
 .btn-play {
     background: var(--accent-dim);
     color: var(--accent);
     border: 1px solid rgba(108, 140, 255, 0.25);
-    padding: 0.4rem 1rem;
+    padding: 0.4rem 1.25rem;
     border-radius: var(--radius);
     font-family: var(--font);
     font-size: 0.8rem;
@@ -190,12 +248,13 @@ canvas {
     font-family: var(--mono);
     font-size: 0.8rem;
     color: var(--text-muted);
+    min-width: 40px;
 }
 
-.hint {
-    text-align: center;
-    font-size: 0.8rem;
-    color: var(--text-muted);
+.signal-controls {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
     margin-top: 0.75rem;
 }
 
@@ -213,7 +272,6 @@ canvas {
     border: 1px solid var(--border);
     border-radius: var(--radius);
     padding: 1.25rem;
-    position: relative;
 }
 
 .step-number {
@@ -303,7 +361,6 @@ tr:hover td { background: var(--surface); }
     min-height: 180px;
 }
 
-/* Heatmap cells */
 .heatmap-grid {
     display: grid;
     gap: 2px;
@@ -328,7 +385,6 @@ tr:hover td { background: var(--surface); }
     font-weight: 500;
 }
 
-/* PRS chart */
 .prs-bar-row {
     display: flex;
     align-items: center;
@@ -427,7 +483,6 @@ tr:hover td { background: var(--surface); }
     margin-top: 0.4rem;
 }
 
-/* Seizure bars */
 .seizure-bars-wrap {
     display: flex;
     justify-content: center;
@@ -439,9 +494,7 @@ tr:hover td { background: var(--surface); }
     align-items: flex-end;
 }
 
-.seizure-col {
-    text-align: center;
-}
+.seizure-col { text-align: center; }
 
 .seizure-bar-stack {
     width: 80px;
@@ -454,10 +507,7 @@ tr:hover td { background: var(--surface); }
     margin-bottom: 0.5rem;
 }
 
-.seizure-seg {
-    transition: height 0.5s;
-}
-
+.seizure-seg { transition: height 0.5s; }
 .seizure-seg.yes { background: var(--red); opacity: 0.8; }
 .seizure-seg.no { background: var(--green); opacity: 0.5; }
 
@@ -473,7 +523,6 @@ tr:hover td { background: var(--surface); }
     color: var(--text-muted);
 }
 
-/* Genetic CTGAN comparison */
 .genetic-comparison {
     display: grid;
     grid-template-columns: repeat(3, 1fr);
@@ -508,7 +557,6 @@ tr:hover td { background: var(--surface); }
     display: block;
 }
 
-/* Validation grid */
 .validation-grid {
     display: grid;
     grid-template-columns: repeat(4, 1fr);
@@ -537,7 +585,7 @@ tr:hover td { background: var(--surface); }
 
 /* ── Responsive ── */
 @media (max-width: 900px) {
-    .comparison-grid, .genetic-grid { grid-template-columns: 1fr; }
+    .segment-grid, .genetic-grid { grid-template-columns: 1fr; }
     .steps-grid, .ctgan-steps { grid-template-columns: repeat(2, 1fr); }
     .ctgan-comparison-grid { grid-template-columns: repeat(2, 1fr); }
     .validation-grid { grid-template-columns: repeat(2, 1fr); }
