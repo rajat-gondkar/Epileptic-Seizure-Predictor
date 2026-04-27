@@ -1,0 +1,545 @@
+/* ============================================================
+   EEG-Genetic Fusion — Presentation Styles
+   Minimalistic, clean, dark theme
+   ============================================================ */
+
+:root {
+    --bg: #0f1117;
+    --surface: #1a1d27;
+    --surface-2: #22262f;
+    --border: #2a2e3a;
+    --text: #e4e6eb;
+    --text-muted: #8b8fa3;
+    --accent: #6c8cff;
+    --accent-dim: rgba(108, 140, 255, 0.12);
+    --green: #4ade80;
+    --green-dim: rgba(74, 222, 128, 0.12);
+    --red: #f87171;
+    --red-dim: rgba(248, 113, 113, 0.12);
+    --orange: #fb923c;
+    --yellow: #fbbf24;
+    --radius: 8px;
+    --font: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+    --mono: 'JetBrains Mono', 'Fira Code', monospace;
+}
+
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+body {
+    font-family: var(--font);
+    background: var(--bg);
+    color: var(--text);
+    line-height: 1.6;
+    -webkit-font-smoothing: antialiased;
+}
+
+/* ── Navigation ── */
+#nav {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0 2rem;
+    height: 56px;
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+    position: sticky;
+    top: 0;
+    z-index: 100;
+}
+
+.nav-brand {
+    font-weight: 600;
+    font-size: 0.95rem;
+    color: var(--accent);
+    letter-spacing: 0.02em;
+}
+
+.nav-tabs { display: flex; gap: 0.25rem; }
+
+.nav-tab {
+    background: none;
+    border: none;
+    padding: 0.5rem 1rem;
+    color: var(--text-muted);
+    font-family: var(--font);
+    font-size: 0.85rem;
+    font-weight: 500;
+    cursor: pointer;
+    border-radius: var(--radius);
+    transition: all 0.2s;
+}
+
+.nav-tab:hover { color: var(--text); background: var(--surface-2); }
+.nav-tab.active { color: var(--accent); background: var(--accent-dim); }
+
+/* ── Pages ── */
+.page { display: none; max-width: 1280px; margin: 0 auto; padding: 2rem; }
+.page.active { display: block; }
+
+.page-header {
+    text-align: center;
+    margin-bottom: 3rem;
+    padding: 2rem 0;
+}
+
+.page-header h1 {
+    font-size: 1.75rem;
+    font-weight: 600;
+    margin-bottom: 0.5rem;
+    letter-spacing: -0.02em;
+}
+
+.subtitle {
+    color: var(--text-muted);
+    font-size: 0.9rem;
+}
+
+/* ── Sections ── */
+section {
+    margin-bottom: 3rem;
+}
+
+section h2 {
+    font-size: 1.15rem;
+    font-weight: 600;
+    margin-bottom: 1rem;
+    color: var(--text);
+    letter-spacing: -0.01em;
+}
+
+.section-desc {
+    color: var(--text-muted);
+    font-size: 0.85rem;
+    margin-bottom: 1.25rem;
+    max-width: 700px;
+}
+
+/* ── Signal Comparison Grid ── */
+.comparison-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 1.5rem;
+}
+
+.signal-panel {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 1rem;
+    overflow: hidden;
+}
+
+.panel-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 0.75rem;
+}
+
+.panel-label {
+    font-size: 0.8rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+}
+
+.raw-label { color: var(--red); }
+.proc-label { color: var(--green); }
+
+.panel-meta {
+    font-size: 0.75rem;
+    color: var(--text-muted);
+    font-family: var(--mono);
+}
+
+canvas {
+    width: 100%;
+    background: var(--bg);
+    border-radius: 4px;
+    display: block;
+}
+
+#canvas-synthetic {
+    height: 250px;
+}
+
+.signal-controls {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    margin-top: 0.75rem;
+}
+
+.btn-play {
+    background: var(--accent-dim);
+    color: var(--accent);
+    border: 1px solid rgba(108, 140, 255, 0.25);
+    padding: 0.4rem 1rem;
+    border-radius: var(--radius);
+    font-family: var(--font);
+    font-size: 0.8rem;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.15s;
+}
+
+.btn-play:hover { background: rgba(108, 140, 255, 0.2); }
+.btn-play.playing { background: var(--red-dim); color: var(--red); border-color: rgba(248,113,113,0.25); }
+
+.time-display {
+    font-family: var(--mono);
+    font-size: 0.8rem;
+    color: var(--text-muted);
+}
+
+.hint {
+    text-align: center;
+    font-size: 0.8rem;
+    color: var(--text-muted);
+    margin-top: 0.75rem;
+}
+
+/* ── Steps Grid ── */
+.steps-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 1rem;
+}
+
+.ctgan-steps { grid-template-columns: repeat(5, 1fr); }
+
+.step-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 1.25rem;
+    position: relative;
+}
+
+.step-number {
+    width: 28px;
+    height: 28px;
+    background: var(--accent-dim);
+    color: var(--accent);
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 0.8rem;
+    font-weight: 600;
+    margin-bottom: 0.75rem;
+}
+
+.step-card h3 {
+    font-size: 0.85rem;
+    font-weight: 600;
+    margin-bottom: 0.5rem;
+}
+
+.step-card p {
+    font-size: 0.78rem;
+    color: var(--text-muted);
+    line-height: 1.5;
+}
+
+/* ── Stats Table ── */
+.stats-table-wrap { overflow-x: auto; }
+
+table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.82rem;
+}
+
+th {
+    background: var(--surface);
+    color: var(--text-muted);
+    font-weight: 500;
+    text-align: left;
+    padding: 0.6rem 1rem;
+    border-bottom: 1px solid var(--border);
+    font-size: 0.75rem;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+}
+
+td {
+    padding: 0.55rem 1rem;
+    border-bottom: 1px solid var(--border);
+    font-family: var(--mono);
+    font-size: 0.8rem;
+}
+
+tr:hover td { background: var(--surface); }
+.total-row td { background: var(--accent-dim); border-top: 2px solid var(--accent); }
+
+/* ── Genetic Section ── */
+.genetic-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 1.5rem;
+}
+
+.genetic-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 1.25rem;
+}
+
+.genetic-card h3 {
+    font-size: 0.85rem;
+    font-weight: 600;
+    margin-bottom: 0.5rem;
+}
+
+.genetic-card p {
+    font-size: 0.78rem;
+    color: var(--text-muted);
+    margin-bottom: 1rem;
+}
+
+.heatmap-container, .chart-container {
+    min-height: 180px;
+}
+
+/* Heatmap cells */
+.heatmap-grid {
+    display: grid;
+    gap: 2px;
+    font-size: 0.7rem;
+}
+
+.heatmap-cell {
+    padding: 4px 6px;
+    text-align: center;
+    border-radius: 3px;
+    font-family: var(--mono);
+    font-size: 0.7rem;
+}
+
+.heatmap-cell.active { background: var(--accent); color: #fff; }
+.heatmap-cell.inactive { background: var(--surface-2); color: var(--text-muted); }
+.heatmap-label {
+    font-family: var(--font);
+    font-size: 0.7rem;
+    color: var(--text-muted);
+    padding: 4px 6px;
+    font-weight: 500;
+}
+
+/* PRS chart */
+.prs-bar-row {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    margin-bottom: 0.4rem;
+    font-size: 0.75rem;
+}
+
+.prs-label {
+    width: 50px;
+    font-family: var(--mono);
+    color: var(--text-muted);
+    text-align: right;
+}
+
+.prs-bar-track {
+    flex: 1;
+    height: 18px;
+    background: var(--surface-2);
+    border-radius: 3px;
+    position: relative;
+    overflow: hidden;
+}
+
+.prs-bar {
+    height: 100%;
+    border-radius: 3px;
+    transition: width 0.6s ease;
+}
+
+.prs-value {
+    font-family: var(--mono);
+    font-size: 0.72rem;
+    width: 50px;
+    color: var(--text-muted);
+}
+
+/* ── CTGAN Charts ── */
+.ctgan-comparison-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 1.25rem;
+}
+
+.dist-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 1rem;
+}
+
+.dist-card h4 {
+    font-size: 0.78rem;
+    font-weight: 500;
+    margin-bottom: 0.75rem;
+    color: var(--text-muted);
+}
+
+.dist-bars {
+    display: flex;
+    align-items: flex-end;
+    gap: 1px;
+    height: 80px;
+}
+
+.dist-bar {
+    flex: 1;
+    min-width: 0;
+    border-radius: 2px 2px 0 0;
+    transition: height 0.3s;
+}
+
+.dist-bar.real { background: var(--accent); opacity: 0.7; }
+.dist-bar.syn { background: var(--orange); opacity: 0.7; }
+
+.dist-legend {
+    display: flex;
+    gap: 1rem;
+    margin-top: 0.5rem;
+    font-size: 0.7rem;
+    color: var(--text-muted);
+}
+
+.legend-dot {
+    display: inline-block;
+    width: 8px;
+    height: 8px;
+    border-radius: 2px;
+    margin-right: 4px;
+}
+
+.dist-stat {
+    font-family: var(--mono);
+    font-size: 0.72rem;
+    color: var(--text-muted);
+    margin-top: 0.4rem;
+}
+
+/* Seizure bars */
+.seizure-bars-wrap {
+    display: flex;
+    justify-content: center;
+}
+
+.seizure-bar-group {
+    display: flex;
+    gap: 3rem;
+    align-items: flex-end;
+}
+
+.seizure-col {
+    text-align: center;
+}
+
+.seizure-bar-stack {
+    width: 80px;
+    height: 200px;
+    background: var(--surface-2);
+    border-radius: 4px;
+    display: flex;
+    flex-direction: column-reverse;
+    overflow: hidden;
+    margin-bottom: 0.5rem;
+}
+
+.seizure-seg {
+    transition: height 0.5s;
+}
+
+.seizure-seg.yes { background: var(--red); opacity: 0.8; }
+.seizure-seg.no { background: var(--green); opacity: 0.5; }
+
+.seizure-label {
+    font-size: 0.78rem;
+    font-weight: 500;
+    margin-bottom: 0.25rem;
+}
+
+.seizure-pct {
+    font-family: var(--mono);
+    font-size: 0.72rem;
+    color: var(--text-muted);
+}
+
+/* Genetic CTGAN comparison */
+.genetic-comparison {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 1rem;
+}
+
+.mut-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 1rem;
+    text-align: center;
+}
+
+.mut-card h4 {
+    font-size: 0.78rem;
+    font-weight: 500;
+    margin-bottom: 0.5rem;
+}
+
+.mut-rates {
+    display: flex;
+    justify-content: center;
+    gap: 1.5rem;
+    font-family: var(--mono);
+    font-size: 0.85rem;
+}
+
+.mut-rate-label {
+    font-size: 0.7rem;
+    color: var(--text-muted);
+    display: block;
+}
+
+/* Validation grid */
+.validation-grid {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 1rem;
+}
+
+.val-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 1.25rem;
+    text-align: center;
+}
+
+.val-card .val-number {
+    font-size: 1.5rem;
+    font-weight: 600;
+    font-family: var(--mono);
+    margin-bottom: 0.25rem;
+}
+
+.val-card .val-label {
+    font-size: 0.75rem;
+    color: var(--text-muted);
+}
+
+/* ── Responsive ── */
+@media (max-width: 900px) {
+    .comparison-grid, .genetic-grid { grid-template-columns: 1fr; }
+    .steps-grid, .ctgan-steps { grid-template-columns: repeat(2, 1fr); }
+    .ctgan-comparison-grid { grid-template-columns: repeat(2, 1fr); }
+    .validation-grid { grid-template-columns: repeat(2, 1fr); }
+    .genetic-comparison { grid-template-columns: repeat(2, 1fr); }
+}

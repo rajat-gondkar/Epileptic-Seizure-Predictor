@@ -1,0 +1,217 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>EEG-Genetic Fusion — Preprocessing Results</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <!-- Navigation -->
+    <nav id="nav">
+        <div class="nav-brand">EEG-Genetic Fusion</div>
+        <div class="nav-tabs">
+            <button class="nav-tab active" data-page="preprocessing">EEG Preprocessing</button>
+            <button class="nav-tab" data-page="ctgan">CTGAN Results</button>
+        </div>
+    </nav>
+
+    <!-- Page 1: Preprocessing -->
+    <main id="page-preprocessing" class="page active">
+        <header class="page-header">
+            <h1>EEG Signal Preprocessing Pipeline</h1>
+            <p class="subtitle">CHB-MIT Scalp EEG Database — Patient chb01</p>
+        </header>
+
+        <!-- EEG Signal Comparison -->
+        <section class="comparison-section">
+            <div class="comparison-grid">
+                <div class="signal-panel">
+                    <div class="panel-header">
+                        <span class="panel-label raw-label">Raw EEG Signal</span>
+                        <span class="panel-meta" id="raw-meta"></span>
+                    </div>
+                    <canvas id="canvas-raw" width="600" height="320"></canvas>
+                    <div class="signal-controls">
+                        <button id="btn-play-raw" class="btn-play">▶ Play</button>
+                        <span class="time-display" id="time-raw">0.0s</span>
+                    </div>
+                </div>
+                <div class="signal-panel">
+                    <div class="panel-header">
+                        <span class="panel-label proc-label">Preprocessed Signal</span>
+                        <span class="panel-meta" id="proc-meta"></span>
+                    </div>
+                    <canvas id="canvas-proc" width="600" height="320"></canvas>
+                    <div class="signal-controls">
+                        <button id="btn-play-proc" class="btn-play">▶ Play</button>
+                        <span class="time-display" id="time-proc">0.0s</span>
+                    </div>
+                </div>
+            </div>
+            <p class="hint">Click <strong>Play</strong> to animate the EEG signal scrolling in real time.</p>
+        </section>
+
+        <!-- Preprocessing Steps -->
+        <section class="steps-section">
+            <h2>Preprocessing Pipeline Steps</h2>
+            <div class="steps-grid">
+                <div class="step-card">
+                    <div class="step-number">1</div>
+                    <h3>Channel Selection</h3>
+                    <p>Select 18 standard 10-20 bipolar channels, deduplicate to <strong>17 unique channels</strong>.</p>
+                </div>
+                <div class="step-card">
+                    <div class="step-number">2</div>
+                    <h3>Bandpass Filter</h3>
+                    <p>4th-order Butterworth filter: <strong>0.5 – 70 Hz</strong>. Removes DC drift and high-frequency noise.</p>
+                </div>
+                <div class="step-card">
+                    <div class="step-number">3</div>
+                    <h3>Notch Filter</h3>
+                    <p>Remove <strong>60 Hz</strong> power line interference (US standard).</p>
+                </div>
+                <div class="step-card">
+                    <div class="step-number">4</div>
+                    <h3>Artifact Rejection</h3>
+                    <p>Reject epochs where amplitude exceeds <strong>±500 µV</strong> threshold.</p>
+                </div>
+                <div class="step-card">
+                    <div class="step-number">5</div>
+                    <h3>Epoch Creation</h3>
+                    <p><strong>5-second windows</strong> with 1-second stride. Labels: interictal (0) or preictal (1) based on 30-min seizure onset window.</p>
+                </div>
+                <div class="step-card">
+                    <div class="step-number">6</div>
+                    <h3>Feature Extraction</h3>
+                    <p><strong>13 features × 17 channels = 221 dimensions</strong> per epoch. Band powers, Hjorth parameters, spike rate, sample entropy.</p>
+                </div>
+            </div>
+        </section>
+
+        <!-- Dataset Stats -->
+        <section class="stats-section">
+            <h2>Processed Dataset Statistics</h2>
+            <div class="stats-table-wrap">
+                <table id="stats-table">
+                    <thead>
+                        <tr>
+                            <th>Patient</th><th>Total Epochs</th><th>Interictal</th><th>Preictal</th><th>Download</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr><td>chb01</td><td>95,699</td><td>86,837</td><td>8,862</td><td>Full</td></tr>
+                        <tr><td>chb03</td><td>87,780</td><td>80,519</td><td>7,261</td><td>Full</td></tr>
+                        <tr><td>chb05</td><td>49,919</td><td>47,107</td><td>2,812</td><td>Full</td></tr>
+                        <tr><td>chb06</td><td>17,472</td><td>16,216</td><td>1,256</td><td>Selective</td></tr>
+                        <tr><td>chb08</td><td>14,662</td><td>12,883</td><td>1,779</td><td>Selective</td></tr>
+                        <tr><td>chb10</td><td>16,642</td><td>14,839</td><td>1,803</td><td>Selective</td></tr>
+                        <tr><td>chb16</td><td>17,547</td><td>15,261</td><td>2,286</td><td>Selective</td></tr>
+                        <tr><td>chb20</td><td>33,894</td><td>27,385</td><td>6,509</td><td>Selective</td></tr>
+                        <tr class="total-row"><td><strong>Total</strong></td><td><strong>333,615</strong></td><td><strong>301,047</strong></td><td><strong>32,568</strong></td><td>—</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </section>
+
+        <!-- Genetic Feature Engineering -->
+        <section class="genetic-section">
+            <h2>Genetic Feature Engineering</h2>
+            <p class="section-desc">12-dimensional genetic vector per patient: 9 binary mutation flags (ClinVar), 2 pLI scores (gnomAD), 1 Polygenic Risk Score (GWAS).</p>
+            <div class="genetic-grid">
+                <div class="genetic-card">
+                    <h3>Mutation Flags (ClinVar)</h3>
+                    <p>9 epilepsy-associated ion channel genes screened for pathogenic variants. Simulated using population carrier frequencies.</p>
+                    <div id="mutation-heatmap" class="heatmap-container"></div>
+                </div>
+                <div class="genetic-card">
+                    <h3>Constraint Scores & PRS</h3>
+                    <p>pLI scores from gnomAD measure gene intolerance to loss-of-function. PRS computed from 15 GWAS epilepsy SNPs.</p>
+                    <div id="prs-chart" class="chart-container"></div>
+                </div>
+            </div>
+        </section>
+    </main>
+
+    <!-- Page 2: CTGAN -->
+    <main id="page-ctgan" class="page">
+        <header class="page-header">
+            <h1>CTGAN Synthetic Data Generation</h1>
+            <p class="subtitle">Conditional Tabular GAN — 190 real → 1,000 synthetic records</p>
+        </header>
+
+        <!-- Pipeline Steps -->
+        <section class="steps-section">
+            <h2>CTGAN Pipeline</h2>
+            <div class="steps-grid ctgan-steps">
+                <div class="step-card">
+                    <div class="step-number">1</div>
+                    <h3>Summary Aggregation</h3>
+                    <p>Per-EDF file summary: mean & std of 13 features (averaged over 17 channels) → <strong>26 EEG columns</strong> + 12 genetic + 3 meta = 41 features per file.</p>
+                </div>
+                <div class="step-card">
+                    <div class="step-number">2</div>
+                    <h3>Log-Transform</h3>
+                    <p>Band powers (~10⁻¹⁰ V²/Hz) → <strong>log₁₀(x + ε)</strong> to prevent precision loss. Without this, CTGAN sees all band powers as zero.</p>
+                </div>
+                <div class="step-card">
+                    <div class="step-number">3</div>
+                    <h3>StandardScaler</h3>
+                    <p>Z-score normalisation on continuous columns before CTGAN training. Inverse-transformed after generation.</p>
+                </div>
+                <div class="step-card">
+                    <div class="step-number">4</div>
+                    <h3>CTGAN Training</h3>
+                    <p>300 epochs, generator/discriminator dim (256,256), batch size 500. 10 discrete columns (mutations + seizure label).</p>
+                </div>
+                <div class="step-card">
+                    <div class="step-number">5</div>
+                    <h3>Generation + Constraints</h3>
+                    <p>1,000 synthetic records generated. Biological constraints enforced: mutation flags ∈ {0,1}, pLI frozen, PRS clipped, band powers ≥ 0.</p>
+                </div>
+            </div>
+        </section>
+
+        <!-- Distribution Comparison -->
+        <section class="comparison-section">
+            <h2>Real vs Synthetic Distributions</h2>
+            <div class="ctgan-comparison-grid" id="ctgan-charts"></div>
+        </section>
+
+        <!-- Seizure Distribution -->
+        <section class="stats-section">
+            <h2>Seizure Label Distribution</h2>
+            <div class="seizure-bars-wrap">
+                <div class="seizure-bar-group" id="seizure-bars"></div>
+            </div>
+        </section>
+
+        <!-- Synthetic Signal Animation -->
+        <section class="comparison-section">
+            <h2>Synthetic EEG Signal Reconstruction</h2>
+            <p class="section-desc">Signals reconstructed from CTGAN-generated band power values. Each line represents one synthetic patient record.</p>
+            <canvas id="canvas-synthetic" width="1200" height="250"></canvas>
+            <div class="signal-controls" style="justify-content: center;">
+                <button id="btn-play-syn" class="btn-play">▶ Play All</button>
+                <span class="time-display" id="time-syn">0.0s</span>
+            </div>
+        </section>
+
+        <!-- Genetic Comparison -->
+        <section class="genetic-section">
+            <h2>Genetic Feature Preservation</h2>
+            <div id="genetic-ctgan-comparison" class="genetic-comparison"></div>
+        </section>
+
+        <!-- Validation Summary -->
+        <section class="stats-section">
+            <h2>Validation Metrics</h2>
+            <div class="validation-grid" id="validation-grid"></div>
+        </section>
+    </main>
+
+    <script src="app.js"></script>
+</body>
+</html>
