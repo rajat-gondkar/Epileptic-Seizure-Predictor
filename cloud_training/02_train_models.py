@@ -228,13 +228,10 @@ def train_lstm(data, config, device, output_dir):
     total_params = sum(p.numel() for p in model.parameters())
     print(f"Model parameters: {total_params:,}")
 
-    # ── Loss with class weighting ──
-    n_neg = int((train_lab == 0).sum())
-    n_pos = int((train_lab == 1).sum())
-    pos_weight = torch.tensor([n_neg / max(n_pos, 1)]).to(device)
-    print(f"Pos weight: {pos_weight.item():.2f}  ({n_neg:,} neg / {n_pos:,} pos)")
-
-    criterion = nn.BCEWithLogitsLoss(pos_weight=pos_weight)
+    # ── Loss ──
+    # Class imbalance is handled by WeightedRandomSampler (oversampling).
+    # No pos_weight needed to avoid double-correction.
+    criterion = nn.BCEWithLogitsLoss()
     optimizer = optim.Adam(
         model.parameters(), lr=cfg["learning_rate"],
         weight_decay=cfg["weight_decay"],
@@ -251,6 +248,12 @@ def train_lstm(data, config, device, output_dir):
     max_epochs = cfg["max_epochs"]
     early_stop = cfg["early_stop_patience"]
     history = []
+    epoch_start_global = time.time()
+
+    # Header for status monitor
+    print(f"\n  {'Epoch':>5} │ {'Train Loss':>10} │ {'Val Loss':>10} │ {'Val AUC':>8} │ "
+          f"{'Sens':>6} │ {'Spec':>6} │ {'LR':>10} │ {'Time':>6} │ {'ETA':>8} │ Status")
+    print("  " + "─" * 95)
 
     for epoch in range(1, max_epochs + 1):
         t0 = time.time()
@@ -316,9 +319,32 @@ def train_lstm(data, config, device, output_dir):
         sens = (pred_bin[labels_arr == 1] == 1).mean() if (labels_arr == 1).any() else 0
         spec = (pred_bin[labels_arr == 0] == 0).mean() if (labels_arr == 0).any() else 0
 
-        print(f"  Epoch {epoch:3d} │ loss={avg_train_loss:.4f} │ "
-              f"val_loss={avg_val_loss:.4f} │ AUC={val_auc:.4f} │ "
-              f"sens={sens:.3f} spec={spec:.3f} │ lr={lr_now:.1e} │ {elapsed:.0f}s")
+        # ETA estimate
+        elapsed_total = time.time() - epoch_start_global
+        avg_epoch_time = elapsed_total / epoch
+        remaining_epochs = max_epochs - epoch
+        eta_sec = avg_epoch_time * remaining_epochs
+        eta_str = f"{int(eta_sec // 60)}m{int(eta_sec % 60):02d}s"
+
+        # Status indicator
+        if val_auc > best_auc:
+            status = "★ BEST"
+        elif patience_counter > 0:
+            status = f"↓ {patience_counter}/{early_stop}"
+        else:
+            status = "  —"
+
+        print(f"  {epoch:5d} │ {avg_train_loss:10.4f} │ {avg_val_loss:10.4f} │ {val_auc:8.4f} │ "
+              f"{sens:6.3f} │ {spec:6.3f} │ {lr_now:10.1e} │ {elapsed:5.0f}s │ {eta_str:>8} │ {status}")
+
+        # ── Save latest checkpoint ──
+        torch.save({
+            "epoch": epoch,
+            "model_state_dict": model.state_dict(),
+            "optimizer_state_dict": optimizer.state_dict(),
+            "val_auc": val_auc,
+            "config": cfg,
+        }, output_dir / "lstm_latest.pt")
 
         # Early stopping
         if val_auc > best_auc:
@@ -331,11 +357,10 @@ def train_lstm(data, config, device, output_dir):
                 "val_auc": best_auc,
                 "config": cfg,
             }, output_dir / "lstm_best.pt")
-            print(f"     ★ New best AUC: {best_auc:.4f}")
         else:
             patience_counter += 1
             if patience_counter >= early_stop:
-                print(f"\n  Early stopping at epoch {epoch} (patience={early_stop})")
+                print(f"\n  Early stopping triggered at epoch {epoch} (patience={early_stop})")
                 break
 
     # Save history
@@ -343,8 +368,9 @@ def train_lstm(data, config, device, output_dir):
         json.dump(history, f, indent=2)
 
     print(f"\n  Best validation AUC: {best_auc:.4f}")
-    print(f"  Model saved: {output_dir / 'lstm_best.pt'}")
-    print(f"  History saved: {output_dir / 'lstm_history.json'}")
+    print(f"  Best model:  {output_dir / 'lstm_best.pt'}")
+    print(f"  Latest model: {output_dir / 'lstm_latest.pt'}")
+    print(f"  History:     {output_dir / 'lstm_history.json'}")
 
     return model, best_auc, history
 
@@ -484,9 +510,9 @@ def main():
 
     if args.quick_test:
         config["lstm"]["max_epochs"] = 3
-        config["lstm"]["batch_size"] = 128
+        config["lstm"]["batch_size"] = 32
         args.max_epochs_per_patient = 2000
-        print("⚡ QUICK TEST MODE: 3 LSTM epochs, 2000 epochs/patient\n")
+        print("⚡ QUICK TEST MODE: 3 LSTM epochs, 32 batch size, 2000 epochs/patient\n")
 
     # ── Device ──
     if torch.cuda.is_available():

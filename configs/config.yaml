@@ -86,7 +86,7 @@ lstm:
   optimizer: "adam"
   learning_rate: 0.001
   weight_decay: 0.0001
-  batch_size: 64
+  batch_size: 32
   max_epochs: 50
   early_stop_patience: 10
   scheduler:

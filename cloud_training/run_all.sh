@@ -29,11 +29,13 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
 cd "$PROJECT_ROOT"
 
+PIPE_START=$(date +%s)
+
 echo "============================================================"
 echo "EEG-Genetic Fusion — Cloud Training Pipeline"
 echo "============================================================"
 echo "Project root: $PROJECT_ROOT"
-echo "Time: $(date)"
+echo "Start time: $(date)"
 echo ""
 
 # Parse arguments
@@ -60,17 +62,20 @@ done
 echo ""
 
 # ── Step 0: Install dependencies ──
+STEP_START=$(date +%s)
 echo "============================================================"
-echo "STEP 0: Installing dependencies"
+echo "[1/3] STEP 0: Installing dependencies"
 echo "============================================================"
 pip install -r cloud_training/requirements.txt 2>&1 | tail -5
-echo "✅ Dependencies installed"
+STEP_END=$(date +%s)
+echo "✅ Dependencies installed  ($((STEP_END - STEP_START))s)"
 echo ""
 
 # ── Step 1: Download & Preprocess EEG data ──
 if [ "$TRAIN_ONLY" = false ]; then
+    STEP_START=$(date +%s)
     echo "============================================================"
-    echo "STEP 1: Download & Preprocess EEG data"
+    echo "[2/3] STEP 1: Download & Preprocess EEG data"
     echo "============================================================"
 
     if [ "$SKIP_DOWNLOAD" = false ]; then
@@ -110,29 +115,36 @@ if ok:
 else:
     print('\n  ⚠ Some patients missing — training may use fewer patients')
 "
+    STEP_END=$(date +%s)
+    echo ""
+    echo "✅ Step 1 complete  ($((STEP_END - STEP_START))s)"
     echo ""
 fi
 
 # ── Step 2: Train models ──
+STEP_START=$(date +%s)
 echo "============================================================"
-echo "STEP 2: Training LSTM + XGBoost"
+echo "[3/3] STEP 2: Training LSTM + XGBoost"
 echo "============================================================"
 echo "Start time: $(date)"
 echo ""
 
 python cloud_training/02_train_models.py $QUICK_TEST
 
+STEP_END=$(date +%s)
 echo ""
-echo "End time: $(date)"
+echo "✅ Step 2 complete  ($((STEP_END - STEP_START))s)"
+echo ""
 
 # ── Summary ──
-echo ""
+PIPE_END=$(date +%s)
 echo "============================================================"
-echo "ALL DONE"
+echo "ALL DONE  (Total elapsed: $((PIPE_END - PIPE_START))s ≈ $(((PIPE_END - PIPE_START)/60)) min)"
 echo "============================================================"
 echo ""
 echo "Download these files from the 'models/' directory:"
-echo "  models/lstm_best.pt          — LSTM model weights"
+echo "  models/lstm_best.pt          — LSTM best checkpoint"
+echo "  models/lstm_latest.pt        — LSTM last epoch checkpoint"
 echo "  models/lstm_history.json     — training curves"
 echo "  models/xgboost_model.pkl     — XGBoost model"
 echo "  models/test_results.json     — test set metrics"
