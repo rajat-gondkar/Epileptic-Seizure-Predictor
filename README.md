@@ -66,10 +66,10 @@ Epilepsy affects ~50 million people worldwide. Existing seizure prediction syste
 | Phase | Description | Status |
 |-------|-------------|--------|
 | 1 | Environment Setup & Data Acquisition | ✅ Complete |
-| 2 | EEG Preprocessing & Feature Extraction | 🔄 In Progress |
+| 2 | EEG Preprocessing & Feature Extraction | ✅ Complete |
 | 3 | Genetic Feature Engineering | ✅ Complete |
-| 4 | Synthetic Data Generation (CTGAN) | 📋 Planned |
-| 5 | Individual Model Training (LSTM + XGBoost) | 📋 Planned |
+| 4 | Synthetic Data Generation (CTGAN) | ✅ Complete |
+| 5 | Individual Model Training (LSTM + XGBoost) | 🔄 In Progress |
 | 6 | Attention-Based Fusion Training | 📋 Planned |
 | 7 | Evaluation & Benchmarking | 📋 Planned |
 | 8 | FastAPI Backend | 📋 Planned |
