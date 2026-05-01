@@ -49,7 +49,7 @@ for arg in "$@"; do
             ;;
         --skip-download)
             SKIP_DOWNLOAD=true
-            echo "⏭ Skipping data download"
+            echo "⏭ Skipping downloads (will still preprocess if needed)"
             ;;
         --train-only)
             TRAIN_ONLY=true
@@ -78,7 +78,10 @@ if [ "$TRAIN_ONLY" = false ]; then
         python cloud_training/01_download_and_preprocess.py \
             --patients chb01 chb03 chb05 chb06 chb08 chb10 chb16 chb20
     else
-        echo "Skipping download (--skip-download)"
+        echo "Skipping downloads, using existing files only (--skip-download)"
+        python cloud_training/01_download_and_preprocess.py \
+            --patients chb01 chb03 chb05 chb06 chb08 chb10 chb16 chb20 \
+            --skip-download
     fi
 
     echo ""

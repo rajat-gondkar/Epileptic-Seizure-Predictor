@@ -28,15 +28,20 @@ cd eeg-genetic-fusion
 bash cloud_training/run_all.sh
 ```
 
-### Option B: Skip download (if data is already present)
+### Option B: Use existing raw data (skip re-downloading EDFs)
+If you copied the `data/raw/` folder but haven't preprocessed yet:
 ```bash
 bash cloud_training/run_all.sh --skip-download
 ```
 
-### Option C: Training only (data already preprocessed)
+### Option C: Training only (preprocessed `.npy` files already present)
 ```bash
 bash cloud_training/run_all.sh --train-only
 ```
+
+> **Tip:** If you copy the entire project folder (including `data/processed/`),
+> just run `bash cloud_training/run_all.sh` without any flags. The scripts
+> automatically skip downloads and preprocessing if the required files exist.
 
 ### Option D: Quick smoke test
 ```bash

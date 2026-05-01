@@ -73,10 +73,13 @@ def parse_summary(summary_path):
 # ============================================================
 # 2. Download a single EDF file with resume support
 # ============================================================
-def download_edf(patient_id, filename, data_dir, dry_run=False):
+def download_edf(patient_id, filename, data_dir, dry_run=False, skip_download=False):
     """Download one EDF file. Skips if already present and correct size."""
     url = f"{PHYSIONET_BASE}/{patient_id}/{filename}"
     dest = data_dir / patient_id / filename
+
+    if skip_download:
+        return "skip"
 
     if dest.exists() and dest.stat().st_size > 30_000_000:  # > 40 MB = likely complete EDF
         return "skip"
@@ -185,6 +188,7 @@ def main():
     parser = argparse.ArgumentParser(description="Selective CHB-MIT download & preprocess")
     parser.add_argument("--dry-run", action="store_true", help="Show plan without downloading")
     parser.add_argument("--download-only", action="store_true", help="Download without preprocessing")
+    parser.add_argument("--skip-download", action="store_true", help="Skip all downloads, use existing files only")
     parser.add_argument("--patients", nargs="+", default=NEW_PATIENTS,
                         help=f"Patients to process (default: {NEW_PATIENTS})")
     args = parser.parse_args()
@@ -212,13 +216,13 @@ def main():
         # Step 1: Ensure summary file exists
         summary_path = data_dir / patient_id / f"{patient_id}-summary.txt"
         if not summary_path.exists():
+            if args.skip_download:
+                print(f"  Summary file missing, skipping patient (--skip-download)")
+                continue
             print(f"  Downloading summary file...")
-            download_edf(patient_id, f"{patient_id}-summary.txt", data_dir, dry_run=args.dry_run)
-            # Re-download as it's not an EDF
-            if not args.dry_run:
-                url = f"{PHYSIONET_BASE}/{patient_id}/{patient_id}-summary.txt"
-                summary_path.parent.mkdir(parents=True, exist_ok=True)
-                urllib.request.urlretrieve(url, str(summary_path))
+            url = f"{PHYSIONET_BASE}/{patient_id}/{patient_id}-summary.txt"
+            summary_path.parent.mkdir(parents=True, exist_ok=True)
+            urllib.request.urlretrieve(url, str(summary_path))
 
         if not summary_path.exists() and not args.dry_run:
             print(f"  ERROR: Could not get summary file, skipping")
@@ -239,7 +243,7 @@ def main():
 
         # Step 3: Download
         for fname in all_files:
-            result = download_edf(patient_id, fname, data_dir, dry_run=args.dry_run)
+            result = download_edf(patient_id, fname, data_dir, dry_run=args.dry_run, skip_download=args.skip_download)
             if result == "ok":
                 total_downloaded += 1
             elif result == "skip":

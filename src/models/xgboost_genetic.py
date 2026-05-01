@@ -65,6 +65,7 @@ def train_xgboost(X_train, y_train, X_val, y_val, config):
     model.fit(
         X_train, y_train,
         eval_set=[(X_val, y_val)],
+        early_stopping_rounds=early_stop,
         verbose=50,
     )
 

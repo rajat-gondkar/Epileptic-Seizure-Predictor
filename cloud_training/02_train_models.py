@@ -28,7 +28,7 @@ import torch.nn as nn
 import torch.optim as optim
 import yaml
 from sklearn.metrics import roc_auc_score, classification_report
-from torch.utils.data import DataLoader, TensorDataset, WeightedRandomSampler
+from torch.utils.data import DataLoader, WeightedRandomSampler
 from tqdm import tqdm
 
 # ── Project root ──
@@ -127,7 +127,7 @@ def load_all_data(config, max_epochs_per_patient=None):
     train_pats = all_pats[:-3]
 
     def merge(pats):
-        seqs  = np.concatenate([np.array(patient_data[p]["sequences"]) for p in pats])
+        seqs  = [patient_data[p]["sequences"] for p in pats]  # keep as list (memmap-friendly)
         feats = np.concatenate([patient_data[p]["features"] for p in pats])
         labs  = np.concatenate([patient_data[p]["labels"] for p in pats])
         return seqs, feats, labs
@@ -145,6 +145,32 @@ def load_all_data(config, max_epochs_per_patient=None):
     splits["val_pats"] = val_pats
     splits["test_pats"] = test_pats
     return splits
+
+
+# ============================================================
+# Dataset that indexes across a list of arrays (memmaps)
+# without copying everything into RAM at once.
+# ============================================================
+class SequenceDataset(torch.utils.data.Dataset):
+    def __init__(self, seqs_list, labels):
+        self.seqs = seqs_list
+        self.labels = np.asarray(labels)
+        self.cumlen = np.cumsum([len(s) for s in seqs_list])
+        if self.cumlen[-1] != len(self.labels):
+            raise ValueError("Total sequences must match number of labels")
+
+    def __len__(self):
+        return int(self.cumlen[-1])
+
+    def __getitem__(self, idx):
+        arr_idx = int(np.searchsorted(self.cumlen, idx, side="right"))
+        if arr_idx > 0:
+            local_idx = idx - self.cumlen[arr_idx - 1]
+        else:
+            local_idx = idx
+        x = torch.from_numpy(np.array(self.seqs[arr_idx][local_idx])).float()
+        y = torch.tensor(self.labels[idx], dtype=torch.float32).unsqueeze(0)
+        return x, y
 
 
 # ============================================================
@@ -167,20 +193,17 @@ def train_lstm(data, config, device, output_dir):
     print("LSTM TRAINING")
     print("=" * 60)
 
-    # ── Tensors (stay on CPU, move batch-by-batch to GPU) ──
-    X_train = torch.FloatTensor(np.array(train_seq))
-    y_train = torch.FloatTensor(train_lab).unsqueeze(1)
-    X_val   = torch.FloatTensor(np.array(val_seq))
-    y_val   = torch.FloatTensor(val_lab).unsqueeze(1)
+    # ── Datasets (keep sequences on disk via memmap) ──
+    train_ds = SequenceDataset(train_seq, train_lab)
+    val_ds   = SequenceDataset(val_seq, val_lab)
 
-    mem_gb = X_train.nelement() * 4 / 1e9
-    print(f"Train: {X_train.shape}  ({mem_gb:.1f} GB)")
-    print(f"Val:   {X_val.shape}")
+    total_seqs = sum(len(s) for s in train_seq)
+    mem_gb = total_seqs * train_seq[0].shape[1] * train_seq[0].shape[2] * 4 / 1e9
+    print(f"Train: {total_seqs:,} epochs, ~{mem_gb:.1f} GB if loaded fully")
+    print(f"Val:   {len(val_lab):,} epochs")
     print(f"Device: {device}")
 
     # ── DataLoaders ──
-    train_ds = TensorDataset(X_train, y_train)
-    val_ds   = TensorDataset(X_val, y_val)
     sampler = create_weighted_sampler(train_lab)
 
     use_cuda = device.type == "cuda"
@@ -376,8 +399,7 @@ def evaluate_test(lstm_model, xgb_model, data, device, output_dir):
     if lstm_model is not None:
         print("\n--- LSTM ---")
         lstm_model.eval()
-        X_test = torch.FloatTensor(np.array(test_seq))
-        test_ds = TensorDataset(X_test, torch.FloatTensor(test_lab).unsqueeze(1))
+        test_ds = SequenceDataset(test_seq, test_lab)
         use_cuda = device.type == "cuda"
         test_loader = DataLoader(
             test_ds, batch_size=128, shuffle=False,
@@ -470,7 +492,7 @@ def main():
     if torch.cuda.is_available():
         device = torch.device("cuda")
         print(f"GPU: {torch.cuda.get_device_name()}")
-        print(f"GPU Memory: {torch.cuda.get_device_properties(0).total_mem / 1e9:.1f} GB")
+        print(f"GPU Memory: {torch.cuda.get_device_properties(0).total_memory / 1e9:.1f} GB")
     else:
         device = torch.device("cpu")
         print("WARNING: No CUDA GPU detected — training will be very slow on CPU")
