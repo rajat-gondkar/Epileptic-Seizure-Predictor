@@ -25,6 +25,18 @@
 
 set -e  # Exit on any error
 
+# Prefer python3 (Ubuntu/Debian default); fallback to python
+if command -v python3 &> /dev/null; then
+    PYTHON=python3
+    PIP=pip3
+elif command -v python &> /dev/null; then
+    PYTHON=python
+    PIP=pip
+else
+    echo "ERROR: Neither 'python3' nor 'python' found. Please install Python 3.10+."
+    exit 1
+fi
+
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
 cd "$PROJECT_ROOT"
@@ -66,7 +78,7 @@ STEP_START=$(date +%s)
 echo "============================================================"
 echo "[1/3] STEP 0: Installing dependencies"
 echo "============================================================"
-pip install -r cloud_training/requirements.txt 2>&1 | tail -5
+$PIP install -r cloud_training/requirements.txt 2>&1 | tail -5
 STEP_END=$(date +%s)
 echo "✅ Dependencies installed  ($((STEP_END - STEP_START))s)"
 echo ""
@@ -80,18 +92,18 @@ if [ "$TRAIN_ONLY" = false ]; then
 
     if [ "$SKIP_DOWNLOAD" = false ]; then
         # Download + preprocess all 8 patients
-        python cloud_training/01_download_and_preprocess.py \
+        $PYTHON cloud_training/01_download_and_preprocess.py \
             --patients chb01 chb03 chb05 chb06 chb08 chb10 chb16 chb20
     else
         echo "Skipping downloads, using existing files only (--skip-download)"
-        python cloud_training/01_download_and_preprocess.py \
+        $PYTHON cloud_training/01_download_and_preprocess.py \
             --patients chb01 chb03 chb05 chb06 chb08 chb10 chb16 chb20 \
             --skip-download
     fi
 
     echo ""
     echo "Verifying data..."
-    python -c "
+    $PYTHON -c "
 import numpy as np
 from pathlib import Path
 
@@ -130,7 +142,7 @@ echo "Start time: $(date)"
 echo ""
 
 mkdir -p models
-python cloud_training/02_train_models.py $QUICK_TEST 2>&1 | tee models/training_log.txt
+$PYTHON cloud_training/02_train_models.py $QUICK_TEST 2>&1 | tee models/training_log.txt
 
 STEP_END=$(date +%s)
 echo ""
@@ -153,4 +165,4 @@ echo "  models/lstm_test_preds.npy   — LSTM predictions (for fusion)"
 echo "  models/xgb_test_preds.npy    — XGBoost predictions (for fusion)"
 echo ""
 echo "To view results:"
-echo "  cat models/test_results.json | python -m json.tool"
+echo "  cat models/test_results.json | $PYTHON -m json.tool"
