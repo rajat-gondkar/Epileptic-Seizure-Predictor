@@ -129,7 +129,7 @@ echo "============================================================"
 echo "Start time: $(date)"
 echo ""
 
-python cloud_training/02_train_models.py $QUICK_TEST
+python cloud_training/02_train_models.py $QUICK_TEST 2>&1 | tee models/training_log.txt
 
 STEP_END=$(date +%s)
 echo ""

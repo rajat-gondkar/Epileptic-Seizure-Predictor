@@ -62,12 +62,22 @@ def train_xgboost(X_train, y_train, X_val, y_val, config):
     xgb_cfg = config.get("xgboost", {})
     early_stop = xgb_cfg.get("early_stopping_rounds", 20)
 
-    model.fit(
-        X_train, y_train,
-        eval_set=[(X_val, y_val)],
-        early_stopping_rounds=early_stop,
-        verbose=50,
-    )
+    # XGBoost 2.0+ moved early_stopping_rounds to callbacks
+    try:
+        model.fit(
+            X_train, y_train,
+            eval_set=[(X_val, y_val)],
+            early_stopping_rounds=early_stop,
+            verbose=50,
+        )
+    except TypeError:
+        callbacks = [xgb.callback.EarlyStopping(rounds=early_stop, save_best=True)]
+        model.fit(
+            X_train, y_train,
+            eval_set=[(X_val, y_val)],
+            callbacks=callbacks,
+            verbose=50,
+        )
 
     # Evaluate
     y_pred_proba = model.predict_proba(X_val)[:, 1]

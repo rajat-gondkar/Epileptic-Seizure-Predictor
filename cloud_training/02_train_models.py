@@ -229,9 +229,15 @@ def train_lstm(data, config, device, output_dir):
     print(f"Model parameters: {total_params:,}")
 
     # ── Loss ──
-    # Class imbalance is handled by WeightedRandomSampler (oversampling).
-    # No pos_weight needed to avoid double-correction.
-    criterion = nn.BCEWithLogitsLoss()
+    # WeightedRandomSampler balances batch composition (oversampling).
+    # Moderate pos_weight (sqrt of ratio) breaks the trivial 0.5-prediction
+    # local minimum without over-aggressive correction.
+    n_neg = int((train_lab == 0).sum())
+    n_pos = int((train_lab == 1).sum())
+    ratio = n_neg / max(n_pos, 1)
+    pos_weight = torch.tensor([np.sqrt(ratio)]).to(device)
+    print(f"Class ratio {ratio:.1f}:1 → pos_weight(sqrt)={pos_weight.item():.2f}")
+    criterion = nn.BCEWithLogitsLoss(pos_weight=pos_weight)
     optimizer = optim.Adam(
         model.parameters(), lr=cfg["learning_rate"],
         weight_decay=cfg["weight_decay"],
@@ -263,15 +269,41 @@ def train_lstm(data, config, device, output_dir):
         train_loss = 0.0
         n_batches = 0
 
+        # Augmentation config
+        aug_cfg = cfg.get("augmentation", {})
+        noise_sigma = aug_cfg.get("gaussian_noise_sigma", 0.0)
+        chan_dropout = aug_cfg.get("channel_dropout_prob", 0.0)
+
         pbar = tqdm(train_loader, desc=f"Epoch {epoch}/{max_epochs}", leave=False)
-        for X_b, y_b in pbar:
+        for batch_idx, (X_b, y_b) in enumerate(pbar):
             X_b, y_b = X_b.to(device, non_blocking=True), y_b.to(device, non_blocking=True)
+
+            # ── Augmentation ──
+            if noise_sigma > 0:
+                X_b = X_b + torch.randn_like(X_b) * noise_sigma
+            if chan_dropout > 0:
+                mask = torch.rand(X_b.shape[0], X_b.shape[2], device=device) > chan_dropout
+                X_b = X_b * mask.unsqueeze(1).float()
 
             optimizer.zero_grad()
             logits = model(X_b)
+
+            # ── Debug: first batch of first epoch ──
+            if epoch == 1 and batch_idx == 0:
+                with torch.no_grad():
+                    probs = torch.sigmoid(logits).cpu().numpy()
+                    print(f"\n  [DEBUG] Batch-0 preds — mean={probs.mean():.4f} std={probs.std():.6f} "
+                          f"min={probs.min():.4f} max={probs.max():.4f}")
+                    if probs.std() < 1e-6:
+                        print("  [WARNING] All predictions identical — model stuck in symmetric min.")
+
             loss = criterion(logits, y_b)
             loss.backward()
-            torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=5.0)
+            grad_norm = torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=5.0)
+
+            if epoch == 1 and batch_idx == 0:
+                print(f"  [DEBUG] Grad norm (clipped): {grad_norm:.4f}")
+
             optimizer.step()
 
             train_loss += loss.item()
