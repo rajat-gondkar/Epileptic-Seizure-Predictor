@@ -249,11 +249,11 @@ def train_lstm(data, config, device, output_dir):
     use_cuda = device.type == "cuda"
     train_loader = DataLoader(
         train_ds, batch_size=cfg["batch_size"], shuffle=True,
-        num_workers=4 if use_cuda else 0, pin_memory=use_cuda,
+        num_workers=0, pin_memory=use_cuda,
     )
     val_loader = DataLoader(
         val_ds, batch_size=cfg["batch_size"] * 2, shuffle=False,
-        num_workers=4 if use_cuda else 0, pin_memory=use_cuda,
+        num_workers=0, pin_memory=use_cuda,
     )
 
     # ── Model ──
@@ -524,7 +524,7 @@ def evaluate_test(lstm_model, xgb_model, data, device, output_dir):
         use_cuda = device.type == "cuda"
         test_loader = DataLoader(
             test_ds, batch_size=128, shuffle=False,
-            num_workers=4 if use_cuda else 0, pin_memory=use_cuda,
+            num_workers=0, pin_memory=use_cuda,
         )
 
         preds = []

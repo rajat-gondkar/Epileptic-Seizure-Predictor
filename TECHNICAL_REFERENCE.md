@@ -411,7 +411,7 @@ All stdout/stderr from the training script is tee'd to `models/training_log.txt`
 | Attention | Self-attention over all timesteps | — |
 | Total parameters | ~759,000 | — |
 | Device | CUDA auto-detect; CPU fallback | MPS explicitly avoided (Apple Silicon bottleneck) |
-| Data loading | `SequenceDataset` with `mmap_mode='r'` | Streams from disk; no full-RAM load |
+| Data loading | `SequenceDataset` with `mmap_mode='r'`, **`num_workers=0`** | Streams from disk; no full-RAM load. Workers disabled to prevent `/dev/shm` exhaustion on cloud VMs. |
 | Batch size | **64** | Better gradient estimates with long sequences |
 | Optimiser | Adam, **lr=1e-4**, weight_decay=1e-4 | Lower LR prevents overshooting |
 | **Loss** | **`FocalLoss(gamma=2.0, alpha=0.75)`** | Replaces BCE + pos_weight; see §6.1 evolution |
@@ -475,7 +475,8 @@ These outputs are the inputs for the Attention Fusion Layer.
 | **LSTM trivial minimum trap** (loss stuck at 0.693, AUC=0.5000) | `WeightedRandomSampler(1/count)` + unweighted `BCEWithLogitsLoss` creates a symmetric minimum at p=0.5. Fixed by using **FocalLoss(gamma=2, alpha=0.75)** with natural batches + bias initialization to dataset positive rate. See §6.1 for evolution. |
 | **Double class-imbalance correction** | Original code used both `WeightedRandomSampler` AND `pos_weight≈10` simultaneously. Fixed to use **Focal Loss alone** (no sampler, no pos_weight). |
 | **VRAM exhaustion on RTX 4050 6 GB** | Batch size 64 + self-attention over 1280 timesteps ≈ 6–7 GB. Mitigated by using 1 LSTM layer instead of 2, plus memory-mapped `SequenceDataset`. |
-| **XGBoost 2.0+ API break** | `early_stopping_rounds` removed from `.fit()`. Fixed with `try/except` fallback to `xgb.callback.EarlyStopping`. |
+| **DataLoader shared-memory crash** (`RuntimeError: unable to allocate shared memory`) | Default `num_workers=4` on CUDA causes `/dev/shm` exhaustion during multi-worker batch collation. Fixed by setting **`num_workers=0`** for train, validation, and test DataLoaders. |
+| **XGBoost 2.0+ API break** | `early_stopping_rounds` removed from `.fit()` and `use_label_encoder` removed from `XGBClassifier`. Fixed with `try/except` fallback for early stopping, and by removing the `use_label_encoder` argument. |
 | **`python` command missing on Ubuntu** | `run_all.sh` now auto-detects `python3` then `python`, and fails gracefully if neither exists. |
 | **Augmentation defined but never applied** | `config.yaml` listed Gaussian noise and channel dropout, but the training loop never executed them. Fixed — augmentation is now active in the batch loop. |
 | **Per-epoch checkpoints bloating disk** | Originally saved every epoch. Fixed to keep only `lstm_best.pt` and `lstm_latest.pt`. |

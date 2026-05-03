@@ -37,7 +37,6 @@ def build_xgboost_model(config):
         colsample_bytree=xgb_cfg.get("colsample_bytree", 0.8),
         scale_pos_weight=xgb_cfg.get("scale_pos_weight", 5),
         eval_metric=xgb_cfg.get("eval_metric", "auc"),
-        use_label_encoder=False,
         tree_method="hist",
         device=device,
         random_state=42,
