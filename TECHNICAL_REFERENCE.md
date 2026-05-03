@@ -297,7 +297,7 @@ Since CHB-MIT provides no real genetic data, profiles are simulated using:
 
 ---
 
-## 6. Model Architecture (Planned — Not Yet Trained)
+## 6. Model Architecture
 
 ### 6.1 EEG Branch — Bidirectional LSTM
 
@@ -311,27 +311,41 @@ Since CHB-MIT provides no real genetic data, profiles are simulated using:
 | Layer 4 | FC(256→64) + ReLU + Dropout(0.3) |
 | Output | FC(64→1) + Sigmoid → P_seizure ∈ [0,1] |
 
-**Training hyperparameters:**
+**Training hyperparameters (final, post-debug):**
 
-| Parameter | Value |
-|-----------|-------|
-| Optimiser | Adam |
-| Learning rate | 1×10⁻³ |
-| Weight decay | 1×10⁻⁴ |
-| Batch size | 64 |
-| Max epochs | 50 |
-| Early stopping patience | 10 (on validation AUC) |
-| LR scheduler | ReduceLROnPlateau (patience=5, factor=0.5) |
-| Loss | Binary Cross-Entropy with positive class weight |
-| Positive class weight | n_interictal / n_preictal (≈10×) |
-| Validation strategy | Patient-level leave-one-out cross-validation |
-| Augmentation | Gaussian noise (σ=0.01); random channel zero-out (p=0.1) |
+| Parameter | Value | Rationale |
+|-----------|-------|-----------|
+| Optimiser | Adam | — |
+| Learning rate | 1×10⁻³ | — |
+| Weight decay | 1×10⁻⁴ | — |
+| Batch size | **32** | Reduced from 64 for RTX 4050 6 GB VRAM (self-attention over 1280 timesteps needs ~6–7 GB at batch=64) |
+| Max epochs | 50 | — |
+| Early stopping patience | **10** (on validation AUC) | — |
+| LR scheduler | ReduceLROnPlateau (patience=5, factor=0.5) | — |
+| Loss | `BCEWithLogitsLoss(pos_weight=3.0)` | Capped at 3.0; see class-balancing evolution below |
+| Sampler | `WeightedRandomSampler(weight=1/√count)` | Moderate oversampling (~25 % positive per batch); prevents trivial 0.5-minimum |
+| Bias init | `_init_final_bias(pos_ratio)` | Final layer bias initialized so initial prediction ≈ dataset positive rate (~8 %), breaking symmetry |
+| Gradient clipping | Max norm = 5.0 | — |
+| Augmentation | Gaussian noise (σ=0.01); random channel zero-out (p=0.1) | Now actually applied in training loop (was previously defined in config but never executed) |
+| Validation strategy | Patient-level leave-one-out cross-validation | Train on first 5 patients, val on 1, test on last 2 |
+| Data loading | Memory-mapped `.npy` via `SequenceDataset` | Streams batches from disk without loading all ~27 GB into RAM |
+| Checkpoints saved | `lstm_best.pt` + `lstm_latest.pt` | Best (by val AUC) and most recent epoch only; per-epoch files removed to save disk |
+
+**Class-balancing evolution (lessons learned):**
+
+| Attempt | Strategy | Result |
+|---------|----------|--------|
+| v1 (original) | `WeightedRandomSampler(1/count)` + `pos_weight = ratio (~10)` | Double-correction; model over-aggressive |
+| v2 (debug) | No sampler + `pos_weight = sqrt(ratio) (~3)` | **Trivial minimum trap** — train loss stuck at 0.693, AUC=0.5000 |
+| **v3 (final)** | `WeightedRandomSampler(1/√count)` + `pos_weight = min(ratio, 3.0)` | Stable gradients; avoids both 0.5-trap and all-0/all-1 oscillation |
+
+*The trivial minimum trap: when batches are perfectly 50/50 (v1 sampler without pos_weight), `BCEWithLogitsLoss` has a global minimum at predicting 0.5 for every sample, producing loss ≈ 0.693 and AUC = 0.5000 forever. Natural batches (v2) with strong pos_weight caused violent oscillation between all-0 and all-1 predictions. The moderate sampler + capped weight (v3) is the stable compromise.*
 
 ### 6.2 Genetic Branch — XGBoost
 
 | Parameter | Value |
 |-----------|-------|
-| Input | 12-dim genetic feature vector |
+| Input | 221-dim EEG feature vector per epoch (XGBoost is currently trained on EEG features only; genetic fusion happens in the fusion layer) |
 | n_estimators | 300 |
 | max_depth | 4 |
 | learning_rate | 0.05 |
@@ -340,7 +354,18 @@ Since CHB-MIT provides no real genetic data, profiles are simulated using:
 | scale_pos_weight | 5 |
 | eval_metric | AUC |
 | early_stopping_rounds | 20 |
+| GPU | CUDA (`device='cuda'`) via histogram method |
 | Output | P_genetic ∈ [0,1] |
+
+**XGBoost 2.0+ API compatibility:**
+XGBoost ≥ 2.0 removed `early_stopping_rounds` from `.fit()`. The training script uses a `try/except` fallback:
+```python
+try:
+    model.fit(..., early_stopping_rounds=20, ...)
+except TypeError:
+    callbacks = [xgb.callback.EarlyStopping(rounds=20, save_best=True)]
+    model.fit(..., callbacks=callbacks, ...)
+```
 
 ### 6.3 Attention-Based Fusion Layer
 
@@ -469,6 +494,8 @@ Since CHB-MIT provides no real genetic data, profiles are simulated using:
 
 ## 10. File Outputs
 
+### Preprocessed Data
+
 | File | Location | Description |
 |------|----------|-------------|
 | `seizure_annotations.csv` | `data/raw/chb-mit/` | 19 seizures, 4 columns |
@@ -499,6 +526,20 @@ Since CHB-MIT provides no real genetic data, profiles are simulated using:
 | `ctgan_results.json` | `presentation/data/` | Distribution comparisons, synthetic signals, validation, 36 KB |
 | `genetic_profiles.json` | `presentation/data/` | Mutation heatmap + PRS data for 8 patients, 4 KB |
 | `feature_stats.json` | `presentation/data/` | Per-feature real vs. synthetic summary statistics, 4 KB |
+
+### Training Outputs (generated after `run_all.sh`)
+
+| File | Location | Description |
+|------|----------|-------------|
+| `lstm_best.pt` | `models/` | Best LSTM checkpoint (highest validation AUC) |
+| `lstm_latest.pt` | `models/` | Most recent epoch checkpoint |
+| `lstm_history.json` | `models/` | Per-epoch train/val loss, AUC, LR, time |
+| `xgboost_model.pkl` | `models/` | Trained XGBoost classifier |
+| `xgboost_metrics.json` | `models/` | Validation AUC, accuracy, precision, recall, F1 |
+| `test_results.json` | `models/` | Final test-set metrics for both models |
+| `lstm_test_preds.npy` | `models/` | LSTM predicted probabilities on test patients |
+| `xgb_test_preds.npy` | `models/` | XGBoost predicted probabilities on test patients |
+| `training_log.txt` | `models/` | Full stdout/stderr from the training run (auto-saved via `tee`) |
 
 ---
 
@@ -599,34 +640,60 @@ Cards showing mutation rate for each gene: real rate vs. synthetic rate. SCN1A: 
 ## 12. Cloud Training Pipeline
 
 **Location**: `cloud_training/`  
-**Target environment**: Ubuntu VM with NVIDIA RTX 4050, CUDA 11.8+, Python 3.10+  
+**Target environment**: Ubuntu VM with NVIDIA RTX 4050 (6 GB VRAM), CUDA 11.8+, Python 3.10+  
 **Entry point**: `bash cloud_training/run_all.sh`
 
 ### 12.1 Scripts
 
 | Script | Purpose |
 |--------|---------|
-| `run_all.sh` | Master shell script; runs steps 01 and 02 in sequence |
-| `01_download_and_preprocess.py` | Downloads selective CHB-MIT EDFs from PhysioNet, runs full preprocessing pipeline |
-| `02_train_models.py` | Trains BiLSTM (PyTorch, CUDA-aware) and XGBoost (GPU via `device='cuda'`) |
+| `run_all.sh` | Master shell script; auto-detects `python3`/`python`, installs deps, runs steps 01 and 02, pipes all output to `models/training_log.txt` via `tee` |
+| `01_download_and_preprocess.py` | Thin wrapper forwarding to `scripts/selective_download_and_preprocess.py` |
+| `02_train_models.py` | Trains BiLSTM and XGBoost with live terminal status monitor |
 | `requirements.txt` | All pip dependencies pinned for reproducibility |
 
-### 12.2 Model Training Specifications
+### 12.2 Shell Script Features
+
+**Python auto-detection:**
+Ubuntu/Debian systems often lack a `python` command. `run_all.sh` now probes for `python3` first, then `python`, and fails gracefully with an error message if neither is found.
+
+**Argument handling:**
+| Flag | Behaviour |
+|------|-----------|
+| (none) | Full pipeline: deps → download → preprocess → train |
+| `--skip-download` | Skips EDF downloads but still runs preprocessing if `.npy` files are missing |
+| `--train-only` | Skips download AND preprocessing; jumps straight to Step 2 |
+| `--quick-test` | 3 LSTM epochs, 2000 epochs/patient cap — smoke test |
+
+**Pipeline progress tracker:**
+The shell script prints `[1/3]`, `[2/3]`, `[3/3]` step headers with elapsed times and a final total duration.
+
+**Log persistence:**
+All stdout/stderr from the training script is tee'd to `models/training_log.txt` automatically. Structured metrics are also saved to `models/lstm_history.json`, `models/xgboost_metrics.json`, and `models/test_results.json`.
+
+### 12.3 Model Training Specifications (Final)
 
 **BiLSTM branch** (`02_train_models.py`):
 
-| Parameter | Value |
-|-----------|-------|
-| Architecture | Bidirectional LSTM, 2 layers, hidden=128, dropout=0.3 |
-| Attention pooling | Self-attention over all timesteps → weighted sum |
-| Total parameters | ~759,000 |
-| Device | Auto-detected: CUDA → CPU (never MPS, which caused bottlenecks) |
-| Data loading | Memory-mapped `.npy` files to avoid OOM on large datasets |
-| Batch size | 64 |
-| Optimiser | Adam, lr=1e-3, weight_decay=1e-4 |
-| Loss | BCEWithLogitsLoss with `pos_weight = n_interictal / n_preictal` |
-| Early stopping | Patience=10 on validation AUC |
-| Output | `cloud_training/outputs/lstm_best.pt` |
+| Parameter | Value | Notes |
+|-----------|-------|-------|
+| Architecture | Bidirectional LSTM, 2 layers, hidden=128, dropout=0.3 | — |
+| Attention | Self-attention over all timesteps | — |
+| Total parameters | ~759,000 | — |
+| Device | CUDA auto-detect; CPU fallback | MPS explicitly avoided (Apple Silicon bottleneck) |
+| Data loading | `SequenceDataset` with `mmap_mode='r'` | Streams from disk; no full-RAM load |
+| Batch size | **32** | Reduced from 64 for 6 GB VRAM safety |
+| Optimiser | Adam, lr=1e-3, weight_decay=1e-4 | — |
+| Loss | `BCEWithLogitsLoss(pos_weight=3.0)` | Capped; see class-balancing evolution in §6.1 |
+| Sampler | `WeightedRandomSampler(weight=1/√count)` | ~25 % positive per batch |
+| Bias init | Final layer bias → `ln(pos_ratio / (1−pos_ratio))` | Breaks 0.5-symmetry trap |
+| Early stopping | Patience=10 on validation AUC | — |
+| LR scheduler | ReduceLROnPlateau (patience=5, factor=0.5) | — |
+| Gradient clipping | Max norm = 5.0 | — |
+| Augmentation | Gaussian noise σ=0.01; channel dropout p=0.1 | Now actively applied in training loop |
+| Checkpoints | `lstm_best.pt` + `lstm_latest.pt` | Best by val AUC, and most recent epoch |
+| Live monitor | Terminal table: Epoch / Train Loss / Val Loss / Val AUC / Sens / Spec / LR / Time / ETA / Status | Updated every epoch |
+| First-batch diagnostics | Prints pred mean/std/min/max, grad norm, per-layer gradient norms | Debug only; confirms model is not stuck |
 
 **XGBoost branch**:
 
@@ -634,32 +701,32 @@ Cards showing mutation rate for each gene: real rate vs. synthetic rate. SCN1A: 
 |-----------|-------|
 | Input | 221-dim feature vector per epoch |
 | GPU | `device='cuda'` (CUDA-accelerated histogram method) |
-| n_estimators | 300 with early stopping (rounds=20) |
+| n_estimators | 300 max |
+| Early stopping | 20 rounds (XGBoost 2.0+ uses `xgb.callback.EarlyStopping`) |
 | eval_metric | AUC |
-| scale_pos_weight | Computed from training label ratio |
-| Output | `cloud_training/outputs/xgboost_model.pkl` |
+| scale_pos_weight | 5 |
+| Output | `models/xgboost_model.pkl` |
 
-### 12.3 Download Strategy
+### 12.4 Download Strategy
 
-`01_download_and_preprocess.py` downloads only the files needed for each patient (seizure files + up to 8 interictal files), not the full dataset. Estimated download: ~700 MB per patient × 8 patients = ~5.6 GB total.
+`scripts/selective_download_and_preprocess.py` downloads only seizure files + up to 8 interictal files per patient. It now supports `--skip-download` to use existing EDFs only (useful when copying the full project folder to another machine).
 
-Files are downloaded via PhysioNet's HTTPS endpoint using `wfdb`. On failure, the script exits with a clear error message rather than silently continuing.
-
-### 12.4 Outputs to Download After Training
-
-After running `run_all.sh` on the cloud VM:
+### 12.5 Outputs After Training
 
 ```
-cloud_training/outputs/
-├── lstm_best.pt              # Best LSTM checkpoint
+models/
+├── lstm_best.pt              # Best LSTM checkpoint (by validation AUC)
+├── lstm_latest.pt            # Last epoch checkpoint (survival net)
+├── lstm_history.json         # Per-epoch loss, AUC, LR, time
 ├── xgboost_model.pkl         # Trained XGBoost model
-├── lstm_test_preds.npy       # LSTM predictions on test set
-├── xgb_test_preds.npy        # XGBoost predictions on test set
-├── training_log.json         # Loss/AUC curves per epoch
-└── preprocessing_stats.csv   # Per-patient epoch counts
+├── xgboost_metrics.json      # Validation AUC/accuracy/precision/recall/F1
+├── test_results.json         # Test-set evaluation (LSTM + XGBoost)
+├── lstm_test_preds.npy       # LSTM predictions on held-out test patients
+├── xgb_test_preds.npy        # XGBoost predictions on held-out test patients
+└── training_log.txt          # Full stdout/stderr from the run
 ```
 
-These outputs are the inputs for Phase 6 (Attention Fusion Layer implementation).
+These outputs are the inputs for the Attention Fusion Layer.
 
 ---
 
@@ -674,4 +741,12 @@ These outputs are the inputs for Phase 6 (Attention Fusion Layer implementation)
 | Canvas hidden on page load | CTGAN synthetic canvas deferred with `requestAnimationFrame + setTimeout(50ms)` |
 | Preprocessing looks similar to raw | Expected behaviour — pipeline is conservative by design. Fixed visualization using shared µV/pixel scale across both panels. |
 | EEG downsampled in presentation JSON | 2:1 stride (256 Hz → 128 Hz effective) applied at export only, to reduce file size. Original data unchanged. |
+| **LSTM trivial minimum trap** (loss stuck at 0.693, AUC=0.5000) | `WeightedRandomSampler(1/count)` + unweighted `BCEWithLogitsLoss` creates a symmetric minimum at p=0.5. Fixed by using moderate sampler (`weight=1/√count`) + capped `pos_weight=3.0` + bias initialization to dataset positive rate. See §6.1 for evolution. |
+| **Double class-imbalance correction** | Original code used both `WeightedRandomSampler` AND `pos_weight≈10` simultaneously. Fixed to use only one mechanism (moderate sampler + capped pos_weight). |
+| **VRAM exhaustion on RTX 4050 6 GB** | Batch size 64 + self-attention over 1280 timesteps ≈ 6–7 GB. Fixed by reducing batch size to 32 and using memory-mapped `SequenceDataset`. |
+| **XGBoost 2.0+ API break** | `early_stopping_rounds` removed from `.fit()`. Fixed with `try/except` fallback to `xgb.callback.EarlyStopping`. |
+| **`python` command missing on Ubuntu** | `run_all.sh` now auto-detects `python3` then `python`, and fails gracefully if neither exists. |
+| **Augmentation defined but never applied** | `config.yaml` listed Gaussian noise and channel dropout, but the training loop never executed them. Fixed — augmentation is now active in the batch loop. |
+| **Per-epoch checkpoints bloating disk** | Originally saved every epoch. Fixed to keep only `lstm_best.pt` and `lstm_latest.pt`. |
+| **No persistent training log** | Terminal output was ephemeral. Fixed — `run_all.sh` now pipes all output to `models/training_log.txt` via `tee`. |
 

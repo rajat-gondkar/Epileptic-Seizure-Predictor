@@ -190,9 +190,20 @@ def _log_grad_norms(model, prefix="  [GRAD]"):
         if p.grad is not None:
             gnorm = p.grad.norm().item()
             lines.append(f"{name}: {gnorm:.6f}")
-    # Print only first 3 and last 3 layers to avoid spam
     for line in (lines[:3] + ["  ..."] + lines[-3:] if len(lines) > 6 else lines):
         print(prefix, line)
+
+
+def create_moderate_sampler(labels):
+    """
+    Oversample minority class but NOT to perfect 50/50.
+    Weights = 1/sqrt(count) so batches are ~25% positive instead of 50%.
+    This prevents the trivial 0.5-minimum trap while still giving
+    the model enough positive examples to learn from.
+    """
+    counts = np.bincount(labels.astype(int))
+    weights = 1.0 / np.sqrt(counts[labels.astype(int)])
+    return WeightedRandomSampler(weights, len(weights), replacement=True)
 
 
 def train_lstm(data, config, device, output_dir):
@@ -215,10 +226,13 @@ def train_lstm(data, config, device, output_dir):
     print(f"Val:   {len(val_lab):,} epochs")
     print(f"Device: {device}")
 
-    # ── DataLoaders (natural distribution — NO sampler) ──
+    # ── DataLoaders ──
+    # Moderate sampler (~25% pos per batch) + small pos_weight.
+    # This combo gives stable gradients without the all-0/all-1 oscillation.
+    sampler = create_moderate_sampler(train_lab)
     use_cuda = device.type == "cuda"
     train_loader = DataLoader(
-        train_ds, batch_size=cfg["batch_size"], shuffle=True,
+        train_ds, batch_size=cfg["batch_size"], sampler=sampler,
         num_workers=4 if use_cuda else 0, pin_memory=use_cuda,
     )
     val_loader = DataLoader(
@@ -239,16 +253,16 @@ def train_lstm(data, config, device, output_dir):
     print(f"Model parameters: {total_params:,}")
 
     # ── Loss ──
-    # Natural batch distribution (no sampler) + strong pos_weight.
-    # This prevents the trivial 0.5-minimum that occurs when batches
-    # are artificially balanced (WeightedRandomSampler) with unweighted loss.
     n_neg = int((train_lab == 0).sum())
     n_pos = int((train_lab == 1).sum())
     ratio = n_neg / max(n_pos, 1)
     pos_ratio = n_pos / len(train_lab)
-    pos_weight = torch.tensor([ratio]).to(device)
+    # Moderate pos_weight (3.0) — strong enough to care about positives,
+    # weak enough to avoid all-0/all-1 oscillation.
+    pos_weight_val = min(ratio, 3.0)
+    pos_weight = torch.tensor([pos_weight_val]).to(device)
     print(f"Class ratio {ratio:.1f}:1  pos_ratio={pos_ratio:.4f}")
-    print(f"pos_weight={pos_weight.item():.2f}  (NO sampler — natural batches)")
+    print(f"pos_weight={pos_weight.item():.2f}  (moderate sampler + capped weight)")
     criterion = nn.BCEWithLogitsLoss(pos_weight=pos_weight)
 
     # Break symmetry: init final bias to predict baseline positive rate
