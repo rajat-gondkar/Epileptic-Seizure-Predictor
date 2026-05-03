@@ -176,11 +176,23 @@ class SequenceDataset(torch.utils.data.Dataset):
 # ============================================================
 # LSTM Training
 # ============================================================
-def create_weighted_sampler(labels):
-    """WeightedRandomSampler for class imbalance."""
-    counts = np.bincount(labels.astype(int))
-    weights = 1.0 / counts[labels.astype(int)]
-    return WeightedRandomSampler(weights, len(weights), replacement=True)
+def _init_final_bias(model, pos_ratio):
+    """Initialize fc2.bias so initial prediction ≈ pos_ratio (breaks 0.5 symmetry)."""
+    with torch.no_grad():
+        bias_val = np.log(pos_ratio / max(1 - pos_ratio, 1e-6))
+        model.fc2.bias.fill_(bias_val)
+
+
+def _log_grad_norms(model, prefix="  [GRAD]"):
+    """Print L2 norm of gradients per layer (diagnostic)."""
+    lines = []
+    for name, p in model.named_parameters():
+        if p.grad is not None:
+            gnorm = p.grad.norm().item()
+            lines.append(f"{name}: {gnorm:.6f}")
+    # Print only first 3 and last 3 layers to avoid spam
+    for line in (lines[:3] + ["  ..."] + lines[-3:] if len(lines) > 6 else lines):
+        print(prefix, line)
 
 
 def train_lstm(data, config, device, output_dir):
@@ -203,12 +215,10 @@ def train_lstm(data, config, device, output_dir):
     print(f"Val:   {len(val_lab):,} epochs")
     print(f"Device: {device}")
 
-    # ── DataLoaders ──
-    sampler = create_weighted_sampler(train_lab)
-
+    # ── DataLoaders (natural distribution — NO sampler) ──
     use_cuda = device.type == "cuda"
     train_loader = DataLoader(
-        train_ds, batch_size=cfg["batch_size"], sampler=sampler,
+        train_ds, batch_size=cfg["batch_size"], shuffle=True,
         num_workers=4 if use_cuda else 0, pin_memory=use_cuda,
     )
     val_loader = DataLoader(
@@ -229,15 +239,24 @@ def train_lstm(data, config, device, output_dir):
     print(f"Model parameters: {total_params:,}")
 
     # ── Loss ──
-    # WeightedRandomSampler balances batch composition (oversampling).
-    # Moderate pos_weight (sqrt of ratio) breaks the trivial 0.5-prediction
-    # local minimum without over-aggressive correction.
+    # Natural batch distribution (no sampler) + strong pos_weight.
+    # This prevents the trivial 0.5-minimum that occurs when batches
+    # are artificially balanced (WeightedRandomSampler) with unweighted loss.
     n_neg = int((train_lab == 0).sum())
     n_pos = int((train_lab == 1).sum())
     ratio = n_neg / max(n_pos, 1)
-    pos_weight = torch.tensor([np.sqrt(ratio)]).to(device)
-    print(f"Class ratio {ratio:.1f}:1 → pos_weight(sqrt)={pos_weight.item():.2f}")
+    pos_ratio = n_pos / len(train_lab)
+    pos_weight = torch.tensor([ratio]).to(device)
+    print(f"Class ratio {ratio:.1f}:1  pos_ratio={pos_ratio:.4f}")
+    print(f"pos_weight={pos_weight.item():.2f}  (NO sampler — natural batches)")
     criterion = nn.BCEWithLogitsLoss(pos_weight=pos_weight)
+
+    # Break symmetry: init final bias to predict baseline positive rate
+    _init_final_bias(model, pos_ratio)
+    with torch.no_grad():
+        init_pred = torch.sigmoid(model.fc2.bias).item()
+    print(f"Initial prediction bias: {init_pred:.4f}")
+
     optimizer = optim.Adam(
         model.parameters(), lr=cfg["learning_rate"],
         weight_decay=cfg["weight_decay"],
@@ -302,7 +321,13 @@ def train_lstm(data, config, device, output_dir):
             grad_norm = torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=5.0)
 
             if epoch == 1 and batch_idx == 0:
-                print(f"  [DEBUG] Grad norm (clipped): {grad_norm:.4f}")
+                print(f"  [DEBUG] Loss={loss.item():.4f}  Grad norm (clipped): {grad_norm:.4f}")
+                if grad_norm < 1e-6:
+                    print("  [WARNING] Gradient norm near zero — model not learning!")
+                _log_grad_norms(model)
+                with torch.no_grad():
+                    probs = torch.sigmoid(logits).cpu().numpy()
+                    print(f"  [DEBUG] After backward — pred mean={probs.mean():.4f} std={probs.std():.6f}")
 
             optimizer.step()
 
