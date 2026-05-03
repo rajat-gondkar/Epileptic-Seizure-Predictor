@@ -304,44 +304,41 @@ Since CHB-MIT provides no real genetic data, profiles are simulated using:
 | Component | Specification |
 |-----------|--------------|
 | Input | Raw EEG sequence [batch, T=1280, C=17] |
-| Layer 1 | Bidirectional LSTM; hidden_size=128; num_layers=2; dropout=0.3 |
+| **CNN Front-End** | **3× Conv1D** (kernel=5, stride=2) with BatchNorm + ReLU |
+|   Conv1 | 17 → 32 channels, 1280 → **640** timesteps |
+|   Conv2 | 32 → 64 channels, 640 → **320** timesteps |
+|   Conv3 | 64 → **128** channels, 320 → **160** timesteps |
+| Layer 1 | Bidirectional LSTM; hidden_size=128; **num_layers=1**; **dropout=0.2** |
 | Effective hidden dim | 256 (bidirectional) |
 | Layer 2 | Self-attention over LSTM output timesteps |
 | Layer 3 | Global average pooling |
-| Layer 4 | FC(256→64) + ReLU + Dropout(0.3) |
+| Layer 4 | FC(256→64) + ReLU + **Dropout(0.2)** |
 | Output | FC(64→1) + Sigmoid → P_seizure ∈ [0,1] |
 
-**Training hyperparameters (final, post-debug):**
+**Training hyperparameters (final, v4):**
 
 | Parameter | Value | Rationale |
 |-----------|-------|-----------|
 | Optimiser | Adam | — |
-| Learning rate | 1×10⁻³ | — |
+| **Learning rate** | **1×10⁻⁴** | Reduced from 1e-3; standard for LSTM on long sequences |
 | Weight decay | 1×10⁻⁴ | — |
-| Batch size | **32** | Reduced from 64 for RTX 4050 6 GB VRAM (self-attention over 1280 timesteps needs ~6–7 GB at batch=64) |
+| **Batch size** | **64** | Better gradient estimates with 1280-timestep sequences |
 | Max epochs | 50 | — |
-| Early stopping patience | **10** (on validation AUC) | — |
-| LR scheduler | ReduceLROnPlateau (patience=5, factor=0.5) | — |
-| Loss | `BCEWithLogitsLoss(pos_weight=3.0)` | Capped at 3.0; see class-balancing evolution below |
-| Sampler | `WeightedRandomSampler(weight=1/√count)` | Moderate oversampling (~25 % positive per batch); prevents trivial 0.5-minimum |
+| **Early stopping patience** | **15** (on validation AUC) | More patience needed with lower LR |
+| **LR warmup** | **Linear, 5 epochs** | Prevents early-epoch collapse before gradients stabilize |
+| LR scheduler (post-warmup) | ReduceLROnPlateau (patience=5, factor=0.5) | — |
+| **Loss** | **`FocalLoss(gamma=2.0, alpha=0.75)`** | Replaces BCE + pos_weight; down-weights easy negatives automatically |
+| Sampler | **None** (natural batches) | Focal Loss handles imbalance internally; no sampler needed |
 | Bias init | `_init_final_bias(pos_ratio)` | Final layer bias initialized so initial prediction ≈ dataset positive rate (~8 %), breaking symmetry |
-| Gradient clipping | Max norm = 5.0 | — |
-| Augmentation | Gaussian noise (σ=0.01); random channel zero-out (p=0.1) | Now actually applied in training loop (was previously defined in config but never executed) |
+| **Gradient clipping** | **Max norm = 1.0** | Tighter clip prevents spikes; grad norms at batch 0 are already small (~0.6) |
+| Augmentation | Gaussian noise σ=0.01; channel dropout p=0.1 | Active in training loop |
 | Validation strategy | Patient-level leave-one-out cross-validation | Train on first 5 patients, val on 1, test on last 2 |
 | Data loading | Memory-mapped `.npy` via `SequenceDataset` | Streams batches from disk without loading all ~27 GB into RAM |
-| Checkpoints saved | `lstm_best.pt` + `lstm_latest.pt` | Best (by val AUC) and most recent epoch only; per-epoch files removed to save disk |
+| Checkpoints saved | `lstm_best.pt` + `lstm_latest.pt` | Best (by val AUC) and most recent epoch only |
+| Live monitor | Terminal table: Epoch / Train Loss / Val Loss / Val AUC / Sens / Spec / LR / Time / ETA / Status | Updated every epoch |
+| First-batch diagnostics | Prints pred mean/std/min/max, grad norm, per-layer gradient norms | Debug only; confirms model is not stuck |
 
-**Class-balancing evolution (lessons learned):**
-
-| Attempt | Strategy | Result |
-|---------|----------|--------|
-| v1 (original) | `WeightedRandomSampler(1/count)` + `pos_weight = ratio (~10)` | Double-correction; model over-aggressive |
-| v2 (debug) | No sampler + `pos_weight = sqrt(ratio) (~3)` | **Trivial minimum trap** — train loss stuck at 0.693, AUC=0.5000 |
-| **v3 (final)** | `WeightedRandomSampler(1/√count)` + `pos_weight = min(ratio, 3.0)` | Stable gradients; avoids both 0.5-trap and all-0/all-1 oscillation |
-
-*The trivial minimum trap: when batches are perfectly 50/50 (v1 sampler without pos_weight), `BCEWithLogitsLoss` has a global minimum at predicting 0.5 for every sample, producing loss ≈ 0.693 and AUC = 0.5000 forever. Natural batches (v2) with strong pos_weight caused violent oscillation between all-0 and all-1 predictions. The moderate sampler + capped weight (v3) is the stable compromise.*
-
-### 6.2 Genetic Branch — XGBoost
+**XGBoost branch**:
 
 | Parameter | Value |
 |-----------|-------|
@@ -351,7 +348,7 @@ Since CHB-MIT provides no real genetic data, profiles are simulated using:
 | learning_rate | 0.05 |
 | subsample | 0.8 |
 | colsample_bytree | 0.8 |
-| scale_pos_weight | 5 |
+| **scale_pos_weight** | **9** | Matches actual ~11:1 class ratio |
 | eval_metric | AUC |
 | early_stopping_rounds | 20 |
 | GPU | CUDA (`device='cuda'`) via histogram method |
@@ -363,277 +360,10 @@ XGBoost ≥ 2.0 removed `early_stopping_rounds` from `.fit()`. The training scri
 try:
     model.fit(..., early_stopping_rounds=20, ...)
 except TypeError:
+    # XGBoost 2.0+ moved early stopping to callbacks
     callbacks = [xgb.callback.EarlyStopping(rounds=20, save_best=True)]
     model.fit(..., callbacks=callbacks, ...)
 ```
-
-### 6.3 Attention-Based Fusion Layer
-
-| Component | Specification |
-|-----------|--------------|
-| Input 1 | eeg_embedding [batch, 64] — penultimate LSTM output |
-| Input 2 | genetic_vector [batch, 12] — raw genetic features |
-| Projection | FC(12→64) + ReLU → genetic_embedding [batch, 64] |
-| Concatenation | combined = [eeg_emb \| gen_emb] → [batch, 128] |
-| Attention gate | FC(128→2) + Softmax → [α_eeg, α_genetic] (sums to 1) |
-| Fusion | P_final = α_eeg × sigmoid(FC(eeg_emb)) + α_genetic × sigmoid(FC(gen_emb)) |
-| Output | P_final ∈ [0,1] |
-
-**Fusion training hyperparameters:**
-
-| Parameter | Value |
-|-----------|-------|
-| Epochs | 30 |
-| Batch size | 32 |
-| Learning rate | 1×10⁻³ |
-| Loss | BCE + L1 regularisation on attention weights (λ=0.01) |
-| LSTM/XGBoost | Frozen during fusion training |
-
-### 6.4 CTGAN Synthetic Data Generator
-
-**Implementation**: `src/models/ctgan_synthetic.py`
-
-**Input data construction**: Per-EDF-file summaries built from the 333,615 processed epochs:
-- For each of **190 EDF files** across 8 patients: mean and std of 13 feature types (averaged across 17 channels) → 26 EEG columns
-- 12 genetic profile columns (attached by patient ID)
-- 1 preictal ratio, 1 epoch count, 1 seizure label → 3 meta columns
-- **Total**: 190 rows × 41 training columns (2 metadata columns dropped before training)
-
-**v2 preprocessing (critical fixes):**
-- Log10-transform applied to band power, variance, and hjorth_activity columns before CTGAN training (values ~1e-10 were lost as 0.0 in CSV)
-- StandardScaler applied to all continuous columns before fit
-- Inverse transforms (inverse-scale → 10^x) applied after synthetic generation
-
-| Parameter | Value |
-|-----------|-------|
-| Generator dimensions | (256, 256) |
-| Discriminator dimensions | (256, 256) |
-| Training epochs | 300 |
-| Batch size | 500 |
-| Synthetic samples generated | 1,000 |
-| Discrete columns | 9 mutation flags + has_seizure |
-| Training time | ~80 seconds |
-
-**Post-generation biological constraints enforced:**
-- Mutation flags rounded and clipped to {0, 1}
-- pLI scores frozen to gnomAD constants (SCN1A=1.0, SCN8A=1.0)
-- PRS clipped to [−5, +5] SD
-- Band powers, variance, spike rate, entropy clipped ≥ 0
-- Preictal ratio clipped to [0, 1]
-- n_valid_epochs clipped ≥ 100 and rounded to integer
-- If all 9 mutation flags = 0 AND PRS < −1 → has_seizure forced to 0 (low genetic risk)
-
-**Validation results — v2 (300 epochs, 1000 synthetic samples, 8 patients):**
-
-| Metric | v1 (3 patients) | v2 (8 patients) |
-|--------|-----------------|------------------|
-| Training rows | 119 | 190 |
-| KS test pass rate | 3/31 (9.7%) | 4/31 (12.9%) |
-| Mean correlation difference | 0.4044 | 0.3583 |
-| Seizure ratio (real → syn) | 16.0% → 17.9% | 26.3% → 29.2% |
-| Mode collapse | Present (std≈0) | Fixed (std ratios 1.01–1.12) |
-| Band power learning | Zero (precision loss) | Correct magnitude (~1e-10) |
-| SCN1A mutation rate | 31.9% → 39.1% | 20.0% → 22.1% |
-
-*Note: KS pass rate remains low due to fundamental sample size limitation (190 real rows). Mode collapse and band power issues from v1 are fully resolved.*
-
----
-
-## 7. Risk Score and Alert System
-
-| Alert Level | Label | Colour | P_final Range | Clinical Action |
-|-------------|-------|--------|--------------|-----------------|
-| 1 | Low Risk | Green | [0.00, 0.25) | Monitor normally |
-| 2 | Moderate Risk | Yellow | [0.25, 0.50) | Increase monitoring frequency |
-| 3 | High Risk | Orange | [0.50, 0.75) | Prepare for possible seizure |
-| 4 | Critical | Red | [0.75, 1.00] | Seizure imminent — alert caregiver |
-
----
-
-## 8. Evaluation Metrics (Target Performance)
-
-| Metric | Target |
-|--------|--------|
-| AUROC | > 0.90 |
-| Sensitivity at FPR = 0.10 | > 85% |
-| Specificity | > 90% |
-| False Prediction Rate | < 0.15 / hour |
-| Seizure Prediction Horizon (SPH) | 30 minutes before onset |
-| Mean prediction lead time | > 20 minutes |
-
-**Baseline comparisons:**
-- Unimodal LSTM (EEG only)
-- Unimodal XGBoost (genetic only)
-- Simple average fusion: (P_eeg + P_genetic) / 2
-- **Proposed**: Attention-based fusion (expected best)
-
-**Prior work benchmarks:**
-- Tsiouris et al. 2018 (LSTM on CHB-MIT): 99.6% accuracy
-- Zhu et al. 2024 (Multidimensional Transformer + RNN): 98.24% sensitivity, 97.27% specificity
-
----
-
-## 9. Software Stack
-
-| Component | Library / Version |
-|-----------|-----------------|
-| EEG processing | MNE-Python v1.12.0 |
-| EDF reading | pyedflib v0.1.42 |
-| EEG download | wfdb v4.3.1 |
-| Deep learning | PyTorch ≥ 2.0 |
-| Classical ML | XGBoost ≥ 1.7 |
-| Synthetic data | CTGAN / SDV |
-| Explainability | SHAP |
-| Scientific computing | NumPy 2.4.4, SciPy 1.17.1, pandas 3.0.2 |
-| API | FastAPI + Uvicorn |
-| Database ORM | SQLAlchemy, psycopg2 (PostgreSQL 15) |
-| Frontend (planned) | React 18, Vite, Recharts, Socket.io |
-| Python | 3.12.12 |
-
----
-
-## 10. File Outputs
-
-### Preprocessed Data
-
-| File | Location | Description |
-|------|----------|-------------|
-| `seizure_annotations.csv` | `data/raw/chb-mit/` | 19 seizures, 4 columns |
-| `epilepsy_variants.csv` | `data/raw/clinvar/` | 13,331 pathogenic variants |
-| `pli_scores.csv` | `data/raw/gnomad/` | pLI + LoF metrics for 9 genes |
-| `epilepsy_snps.csv` | `data/raw/gwas/` | 15 GWAS SNPs with OR and RAF |
-| `genetic_profiles.csv` | `data/processed/genetic_vectors/` | 8 patients × 12 features |
-| `chb01_sequences.npy` | `data/processed/eeg_features/` | (95699, 1280, 17) float32 |
-| `chb01_features.npy` | `data/processed/eeg_features/` | (95699, 221) float32 |
-| `chb01_labels.npy` | `data/processed/eeg_features/` | (95699,) int8 |
-| `chb03_sequences.npy` | `data/processed/eeg_features/` | (87780, 1280, 17) float32 |
-| `chb03_features.npy` | `data/processed/eeg_features/` | (87780, 221) float32 |
-| `chb03_labels.npy` | `data/processed/eeg_features/` | (87780,) int8 |
-| `chb05_sequences.npy` | `data/processed/eeg_features/` | (49919, 1280, 17) float32 |
-| `chb05_features.npy` | `data/processed/eeg_features/` | (49919, 221) float32 |
-| `chb05_labels.npy` | `data/processed/eeg_features/` | (49919,) int8 |
-| `chb06_sequences.npy` | `data/processed/eeg_features/` | (17472, 1280, 17) float32 |
-| `chb08_sequences.npy` | `data/processed/eeg_features/` | (14662, 1280, 17) float32 |
-| `chb10_sequences.npy` | `data/processed/eeg_features/` | (16642, 1280, 17) float32 |
-| `chb16_sequences.npy` | `data/processed/eeg_features/` | (17547, 1280, 17) float32 |
-| `chb20_sequences.npy` | `data/processed/eeg_features/` | (33894, 1280, 17) float32 |
-| `real_summary_dataset.csv` | `data/processed/synthetic/` | 190 per-file EEG summaries (8 patients) |
-| `synthetic_records.csv` | `data/processed/synthetic/` | 1,000 CTGAN synthetic records |
-| `ctgan_model.pkl` | `data/processed/synthetic/` | Trained CTGAN model (~2 MB) |
-| `validation_report.json` | `data/processed/synthetic/` | KS test + correlation metrics |
-| `config.yaml` | `configs/` | All hyperparameters and paths |
-| `eeg_signals.json` | `presentation/data/` | 5 curated EEG segments, raw + processed, 216 KB |
-| `ctgan_results.json` | `presentation/data/` | Distribution comparisons, synthetic signals, validation, 36 KB |
-| `genetic_profiles.json` | `presentation/data/` | Mutation heatmap + PRS data for 8 patients, 4 KB |
-| `feature_stats.json` | `presentation/data/` | Per-feature real vs. synthetic summary statistics, 4 KB |
-
-### Training Outputs (generated after `run_all.sh`)
-
-| File | Location | Description |
-|------|----------|-------------|
-| `lstm_best.pt` | `models/` | Best LSTM checkpoint (highest validation AUC) |
-| `lstm_latest.pt` | `models/` | Most recent epoch checkpoint |
-| `lstm_history.json` | `models/` | Per-epoch train/val loss, AUC, LR, time |
-| `xgboost_model.pkl` | `models/` | Trained XGBoost classifier |
-| `xgboost_metrics.json` | `models/` | Validation AUC, accuracy, precision, recall, F1 |
-| `test_results.json` | `models/` | Final test-set metrics for both models |
-| `lstm_test_preds.npy` | `models/` | LSTM predicted probabilities on test patients |
-| `xgb_test_preds.npy` | `models/` | XGBoost predicted probabilities on test patients |
-| `training_log.txt` | `models/` | Full stdout/stderr from the training run (auto-saved via `tee`) |
-
----
-
-## 11. Presentation Frontend
-
-**Location**: `presentation/`  
-**Entry point**: `presentation/index.html` — serve with `python3 -m http.server 8899`  
-**Data source**: All data extracted from real processed files via `presentation/extract_data.py`; no fabricated values.
-
-### 11.1 Architecture
-
-Pure HTML + Vanilla CSS + Vanilla JS. No frameworks, no build step. Three files:
-
-| File | Role |
-|------|------|
-| `index.html` | Two-page structure: EEG Preprocessing tab and CTGAN Results tab |
-| `style.css` | Minimalist dark theme; CSS custom properties; responsive grid |
-| `app.js` | Canvas signal renderers, CTGAN charts, data loading, animation loops |
-
-### 11.2 EEG Preprocessing Page
-
-#### Signal Comparison Design
-
-Five curated EEG segments are displayed as stacked rows. Each row contains:
-- A **left canvas** (raw signal, red label) and **right canvas** (preprocessed signal, green label)
-- A single **shared Play/Pause button** that animates both canvases in perfect lockstep
-- An **amplitude stats line** showing peak µV before and after filtering, with % reduction
-
-**Critical rendering detail — shared Y-axis scale:**  
-Both canvases within a row use an identical µV/pixel scale, computed from the combined min/max of both raw and processed signals. This ensures amplitude reductions are visually apparent. The earlier implementation incorrectly auto-scaled each canvas independently, making both signals fill the same visual height regardless of actual amplitude difference.
-
-A dashed zero-line is drawn on each canvas at 0 µV to provide an absolute reference point.
-
-#### Curated Segments (from `chb01_03.edf`)
-
-| # | Segment Type | Source Time | Raw Peak | Processed Peak | Reduction | What to look for |
-|---|-------------|-------------|----------|----------------|-----------|-----------------|
-| 1 | Normal Baseline | t=110s | 117.8 µV | 113.2 µV | 3.9% | Minimal change — clean baseline |
-| 2 | Eye Blink Artifact | t=3268s | 273.3 µV | 243.6 µV | 10.9% | FP1-F7 frontal spike suppression |
-| 3 | Muscle/EMG Artifact | t=1726s | 363.6 µV | 274.7 µV | 24.4% | Largest visible amplitude reduction |
-| 4 | Pre-Ictal Period | t=2961s | 191.7 µV | 142.0 µV | 25.9% | Buildup 35s before seizure onset |
-| 5 | During Seizure (Ictal) | t=2998s | 292.1 µV | 256.9 µV | 12.1% | High-amplitude rhythmic discharge |
-
-**Seizure reference**: chb01_03.edf seizure window is 2996–3036 s.
-
-#### Segment Selection Algorithm (`extract_data.py`)
-
-- **Normal baseline**: Sliding-window scan for lowest variance + no peaks > 200 µV, constrained to >300 s away from seizure
-- **Eye blink**: Scans FP1-F7 for high peak-to-std ratio (> 3), moderate overall std (< 80 µV), no sustained high amplitude
-- **Muscle artifact**: Scans all channels for maximum variance of first-difference (proxy for high-frequency content) with total variance < 5000
-- **Pre-ictal**: Fixed at `seizure_start − 35 s`
-- **Ictal**: Fixed at `seizure_start + 2 s`
-
-Downsampling: 2:1 stride applied when exporting to JSON (256 Hz → 128 Hz effective) to keep file size manageable.
-
-#### Why the preprocessed signal looks similar to raw
-
-This is expected and correct behaviour. The preprocessing pipeline is intentionally conservative:
-
-1. **Bandpass 0.5–70 Hz** removes DC drift and noise above 70 Hz, but CHB-MIT scalp EEG energy is naturally concentrated below 70 Hz
-2. **Notch 60 Hz** removes one narrow power-line frequency band
-3. **CAR re-reference** redistributes amplitude across channels but does not suppress signal
-
-No ICA, ASR, or EOG regression is used because these would distort pre-ictal oscillatory patterns that the LSTM needs to detect. The amplitude reductions are real (3–26% depending on segment) but subtle — visible only when both panels share the same scale, which the frontend now enforces.
-
-#### Genetic Feature Section
-
-- **Mutation heatmap**: Grid of 8 patients × 9 genes (binary flags). chb03 has SCN1A=1 (the only carrier).
-- **PRS bar chart**: Diverging bar from zero for each patient; orange bars = positive PRS, blue = negative.
-
-### 11.3 CTGAN Results Page
-
-#### Distribution Charts
-Nine side-by-side histogram comparisons (real vs. synthetic), one per EEG feature. Uses interleaved bars: blue = real, orange = synthetic. Mean values shown below each chart.
-
-#### Seizure Label Distribution
-Stacked vertical bars comparing real (190 records) and synthetic (1,000 records) seizure vs. non-seizure proportions:
-- Real: 26.3% seizure / 73.7% non-seizure
-- Synthetic: 29.2% seizure / 70.8% non-seizure
-
-#### Synthetic Signal Reconstruction Canvas
-
-Five waveforms reconstructed from CTGAN-generated band power values (delta, theta, alpha, beta, gamma), each representing one synthetic patient record. Each channel uses auto-scaled amplitude (the absolute µV values from reconstructed band powers, not comparable to real EEG µV).
-
-**Canvas initialization note**: This canvas is inside a hidden tab at page load, so `getBoundingClientRect()` returns 0 dimensions. Initialization is deferred using `requestAnimationFrame + setTimeout(50ms)` triggered on first tab click. A `synCanvasReady` flag prevents duplicate initialization.
-
-#### Genetic Feature Preservation
-Cards showing mutation rate for each gene: real rate vs. synthetic rate. SCN1A: 20.0% real → 22.1% synthetic (correctly close).
-
-#### Validation Metrics
-- KS test pass rate: 4/31 features (12.9%)
-- Mean correlation difference: 0.358
-- Real patients: 8
-- Synthetic records: 1,000
 
 ---
 
@@ -677,20 +407,21 @@ All stdout/stderr from the training script is tee'd to `models/training_log.txt`
 
 | Parameter | Value | Notes |
 |-----------|-------|-------|
-| Architecture | Bidirectional LSTM, 2 layers, hidden=128, dropout=0.3 | — |
+| Architecture | Bidirectional LSTM, **1 layer**, hidden=128, **dropout=0.2** | Reduced to 1 layer for initial stability debugging |
 | Attention | Self-attention over all timesteps | — |
 | Total parameters | ~759,000 | — |
 | Device | CUDA auto-detect; CPU fallback | MPS explicitly avoided (Apple Silicon bottleneck) |
 | Data loading | `SequenceDataset` with `mmap_mode='r'` | Streams from disk; no full-RAM load |
-| Batch size | **32** | Reduced from 64 for 6 GB VRAM safety |
-| Optimiser | Adam, lr=1e-3, weight_decay=1e-4 | — |
-| Loss | `BCEWithLogitsLoss(pos_weight=3.0)` | Capped; see class-balancing evolution in §6.1 |
-| Sampler | `WeightedRandomSampler(weight=1/√count)` | ~25 % positive per batch |
+| Batch size | **64** | Better gradient estimates with long sequences |
+| Optimiser | Adam, **lr=1e-4**, weight_decay=1e-4 | Lower LR prevents overshooting |
+| **Loss** | **`FocalLoss(gamma=2.0, alpha=0.75)`** | Replaces BCE + pos_weight; see §6.1 evolution |
+| Sampler | **None** (natural batches, shuffle=True) | Focal Loss handles imbalance internally |
 | Bias init | Final layer bias → `ln(pos_ratio / (1−pos_ratio))` | Breaks 0.5-symmetry trap |
-| Early stopping | Patience=10 on validation AUC | — |
-| LR scheduler | ReduceLROnPlateau (patience=5, factor=0.5) | — |
-| Gradient clipping | Max norm = 5.0 | — |
-| Augmentation | Gaussian noise σ=0.01; channel dropout p=0.1 | Now actively applied in training loop |
+| **LR warmup** | **Linear, 5 epochs** | Prevents early-epoch collapse |
+| Early stopping | **Patience=15** on validation AUC | More patience needed with lower LR |
+| LR scheduler (post-warmup) | ReduceLROnPlateau (patience=5, factor=0.5) | — |
+| **Gradient clipping** | **Max norm = 1.0** | Tighter clip prevents gradient spikes |
+| Augmentation | Gaussian noise σ=0.01; channel dropout p=0.1 | Active in training loop |
 | Checkpoints | `lstm_best.pt` + `lstm_latest.pt` | Best by val AUC, and most recent epoch |
 | Live monitor | Terminal table: Epoch / Train Loss / Val Loss / Val AUC / Sens / Spec / LR / Time / ETA / Status | Updated every epoch |
 | First-batch diagnostics | Prints pred mean/std/min/max, grad norm, per-layer gradient norms | Debug only; confirms model is not stuck |
@@ -704,7 +435,7 @@ All stdout/stderr from the training script is tee'd to `models/training_log.txt`
 | n_estimators | 300 max |
 | Early stopping | 20 rounds (XGBoost 2.0+ uses `xgb.callback.EarlyStopping`) |
 | eval_metric | AUC |
-| scale_pos_weight | 5 |
+| scale_pos_weight | 9 |
 | Output | `models/xgboost_model.pkl` |
 
 ### 12.4 Download Strategy
@@ -741,12 +472,16 @@ These outputs are the inputs for the Attention Fusion Layer.
 | Canvas hidden on page load | CTGAN synthetic canvas deferred with `requestAnimationFrame + setTimeout(50ms)` |
 | Preprocessing looks similar to raw | Expected behaviour — pipeline is conservative by design. Fixed visualization using shared µV/pixel scale across both panels. |
 | EEG downsampled in presentation JSON | 2:1 stride (256 Hz → 128 Hz effective) applied at export only, to reduce file size. Original data unchanged. |
-| **LSTM trivial minimum trap** (loss stuck at 0.693, AUC=0.5000) | `WeightedRandomSampler(1/count)` + unweighted `BCEWithLogitsLoss` creates a symmetric minimum at p=0.5. Fixed by using moderate sampler (`weight=1/√count`) + capped `pos_weight=3.0` + bias initialization to dataset positive rate. See §6.1 for evolution. |
-| **Double class-imbalance correction** | Original code used both `WeightedRandomSampler` AND `pos_weight≈10` simultaneously. Fixed to use only one mechanism (moderate sampler + capped pos_weight). |
-| **VRAM exhaustion on RTX 4050 6 GB** | Batch size 64 + self-attention over 1280 timesteps ≈ 6–7 GB. Fixed by reducing batch size to 32 and using memory-mapped `SequenceDataset`. |
+| **LSTM trivial minimum trap** (loss stuck at 0.693, AUC=0.5000) | `WeightedRandomSampler(1/count)` + unweighted `BCEWithLogitsLoss` creates a symmetric minimum at p=0.5. Fixed by using **FocalLoss(gamma=2, alpha=0.75)** with natural batches + bias initialization to dataset positive rate. See §6.1 for evolution. |
+| **Double class-imbalance correction** | Original code used both `WeightedRandomSampler` AND `pos_weight≈10` simultaneously. Fixed to use **Focal Loss alone** (no sampler, no pos_weight). |
+| **VRAM exhaustion on RTX 4050 6 GB** | Batch size 64 + self-attention over 1280 timesteps ≈ 6–7 GB. Mitigated by using 1 LSTM layer instead of 2, plus memory-mapped `SequenceDataset`. |
 | **XGBoost 2.0+ API break** | `early_stopping_rounds` removed from `.fit()`. Fixed with `try/except` fallback to `xgb.callback.EarlyStopping`. |
 | **`python` command missing on Ubuntu** | `run_all.sh` now auto-detects `python3` then `python`, and fails gracefully if neither exists. |
 | **Augmentation defined but never applied** | `config.yaml` listed Gaussian noise and channel dropout, but the training loop never executed them. Fixed — augmentation is now active in the batch loop. |
 | **Per-epoch checkpoints bloating disk** | Originally saved every epoch. Fixed to keep only `lstm_best.pt` and `lstm_latest.pt`. |
 | **No persistent training log** | Terminal output was ephemeral. Fixed — `run_all.sh` now pipes all output to `models/training_log.txt` via `tee`. |
+| **LSTM all-0/all-1 oscillation** (AUC≈0.5, Sens/Spec flip-flopping) | `pos_weight=3` was too weak for 11:1 imbalance; model oscillated between predicting all-negative and all-positive. Fixed by switching to **FocalLoss** and removing the sampler. |
+| **LR 1e-3 too aggressive** | Caused overshooting before model found useful gradient signal. Fixed by reducing to **1e-4** and adding **5-epoch linear warmup**. |
+| **Raw 1280-step LSTM unstable** | Feeding raw 1280 timesteps directly into BiLSTM causes gradient vanishing across the long sequence. Fixed by adding a **1D CNN front-end** (3 conv layers, kernel=5, stride=2) that reduces sequence length 1280 → 160 before the LSTM sees it. This is the standard architecture for CHB-MIT seizure prediction.
+| **Gradient clip 5.0 too loose** | Allowed gradient spikes that destabilized training. Fixed by tightening to **1.0**. |
 

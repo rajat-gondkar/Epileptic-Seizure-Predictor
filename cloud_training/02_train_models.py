@@ -28,7 +28,7 @@ import torch.nn as nn
 import torch.optim as optim
 import yaml
 from sklearn.metrics import roc_auc_score, classification_report
-from torch.utils.data import DataLoader, WeightedRandomSampler
+from torch.utils.data import DataLoader
 from tqdm import tqdm
 
 # ── Project root ──
@@ -36,7 +36,7 @@ SCRIPT_DIR = Path(__file__).resolve().parent
 PROJECT_ROOT = SCRIPT_DIR.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
-from src.models.lstm_eeg import EEGBiLSTM
+from src.models.lstm_eeg import EEGCNNLSTM
 from src.models.xgboost_genetic import train_xgboost
 
 
@@ -174,6 +174,37 @@ class SequenceDataset(torch.utils.data.Dataset):
 
 
 # ============================================================
+# Focal Loss
+# ============================================================
+class FocalLoss(nn.Module):
+    """
+    Focal Loss for binary classification.
+    Down-weights easy examples (majority class) so the model focuses on hard
+    positives and hard negatives.
+
+    FL(pt) = -α_t * (1 - pt)^γ * log(pt)
+
+    Args:
+        gamma: focusing parameter (γ=2 is standard)
+        alpha: positive-class weight (0.75 means 3:1 pos:neg weighting)
+    """
+    def __init__(self, gamma=2.0, alpha=0.75):
+        super().__init__()
+        self.gamma = gamma
+        self.alpha = alpha
+
+    def forward(self, logits, targets):
+        bce = nn.functional.binary_cross_entropy_with_logits(
+            logits, targets, reduction='none'
+        )
+        probs = torch.sigmoid(logits)
+        pt = torch.where(targets == 1, probs, 1 - probs)
+        alpha_t = torch.where(targets == 1, self.alpha, 1 - self.alpha)
+        loss = alpha_t * (1.0 - pt) ** self.gamma * bce
+        return loss.mean()
+
+
+# ============================================================
 # LSTM Training
 # ============================================================
 def _init_final_bias(model, pos_ratio):
@@ -194,20 +225,8 @@ def _log_grad_norms(model, prefix="  [GRAD]"):
         print(prefix, line)
 
 
-def create_moderate_sampler(labels):
-    """
-    Oversample minority class but NOT to perfect 50/50.
-    Weights = 1/sqrt(count) so batches are ~25% positive instead of 50%.
-    This prevents the trivial 0.5-minimum trap while still giving
-    the model enough positive examples to learn from.
-    """
-    counts = np.bincount(labels.astype(int))
-    weights = 1.0 / np.sqrt(counts[labels.astype(int)])
-    return WeightedRandomSampler(weights, len(weights), replacement=True)
-
-
 def train_lstm(data, config, device, output_dir):
-    """Full LSTM training with early stopping and gradient accumulation."""
+    """Full LSTM training with early stopping, focal loss and LR warmup."""
     cfg = config["lstm"]
     train_seq, _, train_lab = data["train"]
     val_seq, _, val_lab = data["val"]
@@ -226,13 +245,10 @@ def train_lstm(data, config, device, output_dir):
     print(f"Val:   {len(val_lab):,} epochs")
     print(f"Device: {device}")
 
-    # ── DataLoaders ──
-    # Moderate sampler (~25% pos per batch) + small pos_weight.
-    # This combo gives stable gradients without the all-0/all-1 oscillation.
-    sampler = create_moderate_sampler(train_lab)
+    # ── DataLoaders (natural distribution, NO sampler) ──
     use_cuda = device.type == "cuda"
     train_loader = DataLoader(
-        train_ds, batch_size=cfg["batch_size"], sampler=sampler,
+        train_ds, batch_size=cfg["batch_size"], shuffle=True,
         num_workers=4 if use_cuda else 0, pin_memory=use_cuda,
     )
     val_loader = DataLoader(
@@ -241,7 +257,7 @@ def train_lstm(data, config, device, output_dir):
     )
 
     # ── Model ──
-    model = EEGBiLSTM(
+    model = EEGCNNLSTM(
         input_size=cfg["input_size"],
         hidden_size=cfg["hidden_size"],
         num_layers=cfg["num_layers"],
@@ -252,18 +268,14 @@ def train_lstm(data, config, device, output_dir):
     total_params = sum(p.numel() for p in model.parameters())
     print(f"Model parameters: {total_params:,}")
 
-    # ── Loss ──
+    # ── Loss: Focal Loss (replaces BCEWithLogitsLoss + pos_weight) ──
     n_neg = int((train_lab == 0).sum())
     n_pos = int((train_lab == 1).sum())
     ratio = n_neg / max(n_pos, 1)
     pos_ratio = n_pos / len(train_lab)
-    # Moderate pos_weight (3.0) — strong enough to care about positives,
-    # weak enough to avoid all-0/all-1 oscillation.
-    pos_weight_val = min(ratio, 3.0)
-    pos_weight = torch.tensor([pos_weight_val]).to(device)
     print(f"Class ratio {ratio:.1f}:1  pos_ratio={pos_ratio:.4f}")
-    print(f"pos_weight={pos_weight.item():.2f}  (moderate sampler + capped weight)")
-    criterion = nn.BCEWithLogitsLoss(pos_weight=pos_weight)
+    print(f"Loss: FocalLoss(gamma=2, alpha=0.75)  (NO sampler — natural batches)")
+    criterion = FocalLoss(gamma=2.0, alpha=0.75)
 
     # Break symmetry: init final bias to predict baseline positive rate
     _init_final_bias(model, pos_ratio)
@@ -271,11 +283,14 @@ def train_lstm(data, config, device, output_dir):
         init_pred = torch.sigmoid(model.fc2.bias).item()
     print(f"Initial prediction bias: {init_pred:.4f}")
 
+    # ── Optimiser ──
+    base_lr = cfg["learning_rate"]
     optimizer = optim.Adam(
-        model.parameters(), lr=cfg["learning_rate"],
+        model.parameters(), lr=base_lr,
         weight_decay=cfg["weight_decay"],
     )
-    scheduler = optim.lr_scheduler.ReduceLROnPlateau(
+    # ReduceLROnPlateau is used only AFTER warmup
+    plateau_scheduler = optim.lr_scheduler.ReduceLROnPlateau(
         optimizer, mode="max",
         patience=cfg["scheduler"]["patience"],
         factor=cfg["scheduler"]["factor"],
@@ -288,6 +303,7 @@ def train_lstm(data, config, device, output_dir):
     early_stop = cfg["early_stop_patience"]
     history = []
     epoch_start_global = time.time()
+    warmup_epochs = 5
 
     # Header for status monitor
     print(f"\n  {'Epoch':>5} │ {'Train Loss':>10} │ {'Val Loss':>10} │ {'Val AUC':>8} │ "
@@ -296,6 +312,12 @@ def train_lstm(data, config, device, output_dir):
 
     for epoch in range(1, max_epochs + 1):
         t0 = time.time()
+
+        # ── Linear LR Warmup (epochs 1–5) ──
+        if epoch <= warmup_epochs:
+            warmup_factor = epoch / warmup_epochs
+            for pg in optimizer.param_groups:
+                pg['lr'] = base_lr * warmup_factor
 
         # — Train —
         model.train()
@@ -332,7 +354,7 @@ def train_lstm(data, config, device, output_dir):
 
             loss = criterion(logits, y_b)
             loss.backward()
-            grad_norm = torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=5.0)
+            grad_norm = torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
 
             if epoch == 1 and batch_idx == 0:
                 print(f"  [DEBUG] Loss={loss.item():.4f}  Grad norm (clipped): {grad_norm:.4f}")
@@ -375,7 +397,9 @@ def train_lstm(data, config, device, output_dir):
         except ValueError:
             val_auc = 0.5
 
-        scheduler.step(val_auc)
+        # ── Scheduler step (only after warmup) ──
+        if epoch > warmup_epochs:
+            plateau_scheduler.step(val_auc)
         lr_now = optimizer.param_groups[0]["lr"]
         elapsed = time.time() - t0
 
@@ -581,9 +605,9 @@ def main():
 
     if args.quick_test:
         config["lstm"]["max_epochs"] = 3
-        config["lstm"]["batch_size"] = 32
+        config["lstm"]["batch_size"] = 64
         args.max_epochs_per_patient = 2000
-        print("⚡ QUICK TEST MODE: 3 LSTM epochs, 32 batch size, 2000 epochs/patient\n")
+        print("⚡ QUICK TEST MODE: 3 LSTM epochs, 64 batch size, 2000 epochs/patient\n")
 
     # ── Device ──
     if torch.cuda.is_available():

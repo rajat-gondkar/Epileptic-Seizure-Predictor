@@ -1,12 +1,22 @@
 #!/usr/bin/env python3
 """
-LSTM EEG Seizure Prediction Model
-====================================
-Bidirectional LSTM with self-attention for binary seizure prediction
-from raw EEG sequences [batch, T=1280, C=17].
+CNN-LSTM EEG Seizure Prediction Model
+=======================================
+1D CNN front-end (3 layers) extracts local spatial-temporal features from
+raw EEG, reducing sequence length 1280 → ~160 before the BiLSTM sees it.
+This dramatically improves gradient flow compared to feeding raw 1280-step
+sequences directly into the LSTM.
 
 Architecture:
-    Input → BiLSTM(2 layers, hidden=128) → Self-Attention → AvgPool → FC(256→64) → FC(64→1) → Sigmoid
+    Input [B, T=1280, C=17]
+    → Conv1D(17→32, k=5, s=2) + BN + ReLU  → [B, 640, 32]
+    → Conv1D(32→64, k=5, s=2) + BN + ReLU  → [B, 320, 64]
+    → Conv1D(64→128, k=5, s=2) + BN + ReLU → [B, 160, 128]
+    → BiLSTM(1 layer, hidden=128)           → [B, 160, 256]
+    → Self-Attention                        → [B, 160, 256]
+    → Global Avg Pool                       → [B, 256]
+    → FC(256→64) + ReLU + Dropout(0.2)
+    → FC(64→1) + Sigmoid
 """
 
 import torch
@@ -43,16 +53,16 @@ class SelfAttention(nn.Module):
         return attended, weights
 
 
-class EEGBiLSTM(nn.Module):
+class EEGCNNLSTM(nn.Module):
     """
-    Bidirectional LSTM for EEG seizure prediction.
+    CNN-LSTM for EEG seizure prediction.
 
     Input:  [batch, T=1280, C=17]  (raw EEG sequences)
     Output: [batch, 1]             (seizure probability)
     """
 
-    def __init__(self, input_size=17, hidden_size=128, num_layers=2,
-                 dropout=0.3, embedding_dim=64):
+    def __init__(self, input_size=17, hidden_size=128, num_layers=1,
+                 dropout=0.2, embedding_dim=64):
         super().__init__()
 
         self.input_size = input_size
@@ -60,12 +70,24 @@ class EEGBiLSTM(nn.Module):
         self.num_layers = num_layers
         self.embedding_dim = embedding_dim
 
-        # Input batch normalization
-        self.input_bn = nn.BatchNorm1d(input_size)
+        # ── 1D CNN Front-End ──
+        # Reduces sequence length: 1280 → 640 → 320 → 160
+        self.conv1 = nn.Conv1d(input_size, 32, kernel_size=5, stride=2, padding=2)
+        self.bn1   = nn.BatchNorm1d(32)
 
-        # Bidirectional LSTM
+        self.conv2 = nn.Conv1d(32, 64, kernel_size=5, stride=2, padding=2)
+        self.bn2   = nn.BatchNorm1d(64)
+
+        self.conv3 = nn.Conv1d(64, 128, kernel_size=5, stride=2, padding=2)
+        self.bn3   = nn.BatchNorm1d(128)
+
+        cnn_output_channels = 128
+        cnn_output_length   = 160   # 1280 / 2 / 2 / 2
+
+        # ── Bidirectional LSTM ──
+        # Now receives 160 timesteps instead of 1280
         self.lstm = nn.LSTM(
-            input_size=input_size,
+            input_size=cnn_output_channels,
             hidden_size=hidden_size,
             num_layers=num_layers,
             batch_first=True,
@@ -73,10 +95,10 @@ class EEGBiLSTM(nn.Module):
             bidirectional=True,
         )
 
-        # Self-attention over timesteps
+        # ── Self-attention over LSTM timesteps ──
         self.attention = SelfAttention(hidden_size * 2)  # *2 for bidirectional
 
-        # Classifier head
+        # ── Classifier head ──
         self.fc1 = nn.Linear(hidden_size * 2, embedding_dim)
         self.dropout = nn.Dropout(dropout)
         self.fc2 = nn.Linear(embedding_dim, 1)
@@ -91,18 +113,26 @@ class EEGBiLSTM(nn.Module):
             logits: [batch, 1]
             embedding: [batch, 64] (only if return_embedding=True)
         """
-        # Input normalization: [B, T, C] → [B, C, T] → BN → [B, T, C]
-        x = x.transpose(1, 2)
-        x = self.input_bn(x)
-        x = x.transpose(1, 2)
+        # x: [B, T, C] → [B, C, T] for Conv1d
+        x = x.transpose(1, 2)   # [B, 17, 1280]
 
-        # LSTM: [B, T, C] → [B, T, 2*hidden]
+        # Conv block 1: [B, 17, 1280] → [B, 32, 640]
+        x = F.relu(self.bn1(self.conv1(x)))
+        # Conv block 2: [B, 32, 640] → [B, 64, 320]
+        x = F.relu(self.bn2(self.conv2(x)))
+        # Conv block 3: [B, 64, 320] → [B, 128, 160]
+        x = F.relu(self.bn3(self.conv3(x)))
+
+        # Back to [B, T, C] for LSTM
+        x = x.transpose(1, 2)   # [B, 160, 128]
+
+        # LSTM: [B, 160, 128] → [B, 160, 256]
         lstm_out, _ = self.lstm(x)
 
-        # Self-attention: [B, T, 2*hidden] → [B, T, 2*hidden]
+        # Self-attention: [B, 160, 256] → [B, 160, 256]
         attended, _ = self.attention(lstm_out)
 
-        # Global average pooling: [B, T, 2*hidden] → [B, 2*hidden]
+        # Global average pooling: [B, 160, 256] → [B, 256]
         pooled = attended.mean(dim=1)
 
         # FC layers: [B, 256] → [B, 64] → [B, 1]
