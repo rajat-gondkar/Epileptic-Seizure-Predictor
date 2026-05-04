@@ -261,11 +261,11 @@ def train_lstm(data, config, device, output_dir):
     print(f"Train: {total_seqs:,} epochs, ~{mem_gb:.1f} GB if loaded fully")
     print(f"Val:   {len(val_lab):,} epochs")
     print(f"Device: {device}")
-    print(f"CUDA I/O: pin_memory={use_cuda}, non_blocking=True")
-    print("  NOTE: CPU at 100% is expected — STFT is computed on CPU with num_workers=0")
 
     # ── DataLoaders (natural distribution, NO sampler) ──
     use_cuda = device.type == "cuda"
+    print(f"CUDA I/O: pin_memory={use_cuda}, non_blocking=True")
+    print("  NOTE: CPU at 100% is expected — STFT is computed on CPU with num_workers=0")
     train_loader = DataLoader(
         train_ds, batch_size=cfg["batch_size"], shuffle=True,
         num_workers=0, pin_memory=use_cuda,
