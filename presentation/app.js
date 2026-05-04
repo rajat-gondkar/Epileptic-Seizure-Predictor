@@ -537,10 +537,13 @@ function initGeneticComparison() {
 
 function initValidationGrid() {
     const container = document.getElementById('validation-grid');
-    const v = ctganData.validation;
+    const v = ctganData.validation || {};
+    const ksPass = v.n_ks_pass ?? 4;
+    const ksTotal = v.n_ks_total ?? 31;
+    const corrDiff = v.mean_correlation_diff ?? 0.36;
     const cards = [
-        { label: 'KS Test Pass Rate', value: `${v.ks_pass_rate?.split('/')[0] || '4'}/31`, color: '#fb923c' },
-        { label: 'Correlation Diff', value: (v.mean_correlation_diff || 0.36).toFixed(3), color: '#6c8cff' },
+        { label: 'KS Test Pass Rate', value: `${ksPass}/${ksTotal}`, color: '#fb923c' },
+        { label: 'Correlation Diff', value: corrDiff.toFixed(3), color: '#6c8cff' },
         { label: 'Real Patients', value: ctganData.real_patients || 8, color: '#4ade80' },
         { label: 'Synthetic Records', value: ctganData.syn_count || 1000, color: '#fbbf24' },
     ];
