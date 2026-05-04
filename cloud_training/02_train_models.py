@@ -349,8 +349,8 @@ def train_lstm(data, config, device, output_dir):
             if noise_sigma > 0:
                 X_b = X_b + torch.randn_like(X_b) * noise_sigma
             if chan_dropout > 0:
-                mask = torch.rand(X_b.shape[0], X_b.shape[2], device=device) > chan_dropout
-                X_b = X_b * mask.unsqueeze(1).float()
+                mask = torch.rand(X_b.shape[0], X_b.shape[1], device=device) > chan_dropout
+                X_b = X_b * mask.unsqueeze(-1).unsqueeze(-1).float()
 
             optimizer.zero_grad()
             logits = model(X_b)
