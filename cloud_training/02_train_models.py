@@ -426,18 +426,18 @@ def train_lstm(data, config, device, output_dir):
         lr_now = optimizer.param_groups[0]["lr"]
         elapsed = time.time() - t0
 
+        # Calculate sensitivity/specificity at configured threshold
+        threshold = cfg.get("classification_threshold", 0.20)
+        pred_bin = (preds_arr >= threshold).astype(int)
+        sens = (pred_bin[labels_arr == 1] == 1).mean() if (labels_arr == 1).any() else 0
+        spec = (pred_bin[labels_arr == 0] == 0).mean() if (labels_arr == 0).any() else 0
+
         history.append({
             "epoch": epoch, "train_loss": avg_train_loss,
             "val_loss": avg_val_loss, "val_auc": val_auc,
             "val_sens": float(sens), "val_spec": float(spec),
             "lr": lr_now, "time_sec": elapsed,
         })
-
-        # Calculate sensitivity/specificity at configured threshold
-        threshold = cfg.get("classification_threshold", 0.20)
-        pred_bin = (preds_arr >= threshold).astype(int)
-        sens = (pred_bin[labels_arr == 1] == 1).mean() if (labels_arr == 1).any() else 0
-        spec = (pred_bin[labels_arr == 0] == 0).mean() if (labels_arr == 0).any() else 0
 
         # ETA estimate
         elapsed_total = time.time() - epoch_start_global
