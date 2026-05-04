@@ -583,6 +583,163 @@ tr:hover td { background: var(--surface); }
     color: var(--text-muted);
 }
 
+/* ── Option A: Profile Cards ── */
+.profile-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+    gap: 0.75rem;
+}
+
+.profile-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 0.75rem;
+    min-width: 0;
+}
+
+.profile-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 0.4rem;
+}
+
+.profile-id {
+    font-family: var(--mono);
+    font-size: 0.8rem;
+    font-weight: 600;
+    color: var(--accent);
+}
+
+.profile-badge {
+    font-size: 0.65rem;
+    font-weight: 600;
+    padding: 0.15rem 0.5rem;
+    border-radius: 4px;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+}
+
+.profile-badge.seizure-yes { background: var(--red-dim); color: var(--red); }
+.profile-badge.seizure-no  { background: var(--green-dim); color: var(--green); }
+
+.profile-label {
+    font-size: 0.75rem;
+    color: var(--text-muted);
+    margin-bottom: 0.75rem;
+}
+
+.profile-bands {
+    margin-bottom: 0.75rem;
+}
+
+.profile-band {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    margin-bottom: 0.3rem;
+}
+
+.profile-band-label {
+    font-family: var(--mono);
+    font-size: 0.72rem;
+    font-weight: 600;
+    width: 18px;
+    text-align: center;
+}
+
+.profile-band-track {
+    flex: 1;
+    height: 6px;
+    background: var(--surface-2);
+    border-radius: 3px;
+    overflow: hidden;
+}
+
+.profile-band-fill {
+    height: 100%;
+    border-radius: 3px;
+    transition: width 0.5s ease;
+}
+
+.profile-band-val {
+    font-family: var(--mono);
+    font-size: 0.6rem;
+    color: var(--text-muted);
+    width: 55px;
+    text-align: right;
+    word-break: break-all;
+}
+
+.profile-metrics {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 0.4rem;
+}
+
+.profile-metric {
+    background: var(--bg);
+    border-radius: 4px;
+    padding: 0.4rem 0.5rem;
+    text-align: center;
+}
+
+.profile-metric-label {
+    font-size: 0.62rem;
+    color: var(--text-muted);
+    display: block;
+    margin-bottom: 0.1rem;
+}
+
+.profile-metric-val {
+    font-family: var(--mono);
+    font-size: 0.75rem;
+    font-weight: 500;
+    color: var(--text);
+}
+
+/* ── Option C: Raw Table ── */
+.raw-table-wrap {
+    overflow-x: auto;
+    border-radius: var(--radius);
+    border: 1px solid var(--border);
+}
+
+.raw-table-wrap table {
+    width: 100%;
+    font-size: 0.78rem;
+    min-width: 900px;
+}
+
+.raw-table-wrap th {
+    background: var(--surface);
+    color: var(--text-muted);
+    font-weight: 500;
+    padding: 0.55rem 0.7rem;
+    border-bottom: 1px solid var(--border);
+    font-size: 0.72rem;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    white-space: nowrap;
+}
+
+.raw-table-wrap td {
+    padding: 0.5rem 0.7rem;
+    border-bottom: 1px solid var(--border);
+    font-family: var(--mono);
+    font-size: 0.75rem;
+    white-space: nowrap;
+}
+
+.raw-table-wrap tr:hover td { background: var(--surface); }
+
+/* Wider band-power columns in raw table */
+.raw-table-wrap th.col-band,
+.raw-table-wrap td.col-band {
+    min-width: 100px;
+}
+
 /* ── Responsive ── */
 @media (max-width: 900px) {
     .segment-grid, .genetic-grid { grid-template-columns: 1fr; }
