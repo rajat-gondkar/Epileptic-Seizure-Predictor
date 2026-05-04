@@ -311,11 +311,11 @@ Since CHB-MIT provides no real genetic data, profiles are simulated using:
 |   Conv2 | 32 → 64 channels, freq 35 → **18**, time preserved |
 |   Conv3 | 64 → **128** channels, freq 18 → **9**, time preserved |
 | Pool | AdaptiveAvgPool2d((1, None)) → [batch, 128, 1, T] → squeeze → [batch, T, 128] |
-| Layer 1 | Bidirectional LSTM; hidden_size=128; **num_layers=1**; **dropout=0.2** |
+| Layer 1 | Bidirectional LSTM; hidden_size=128; **num_layers=1**; **dropout=0.5** |
 | Effective hidden dim | 256 (bidirectional) |
 | Layer 2 | Self-attention over LSTM output timesteps |
 | Layer 3 | Global average pooling |
-| Layer 4 | FC(256→64) + ReLU + **Dropout(0.2)** |
+| Layer 4 | FC(256→64) + ReLU + **Dropout(0.5)** |
 | Output | FC(64→1) + Sigmoid → P_seizure ∈ [0,1] |
 
 **Training hyperparameters (final, v4):**
@@ -330,7 +330,7 @@ Since CHB-MIT provides no real genetic data, profiles are simulated using:
 | **Early stopping patience** | **15** (on validation AUC) | More patience needed with lower LR |
 | **LR warmup** | **Linear, 5 epochs** | Prevents early-epoch collapse before gradients stabilize |
 | LR scheduler (post-warmup) | ReduceLROnPlateau (patience=5, factor=0.5) | — |
-| **Loss** | **`FocalLoss(gamma=2.0, alpha=0.75)`** | Replaces BCE + pos_weight; down-weights easy negatives automatically |
+| **Loss** | **`FocalLoss(gamma=2.0, alpha=0.90)`** | `alpha=0.90` gives 9× weight to positive-class errors, stronger than previous 0.75, to combat 11:1 imbalance |
 | Sampler | **None** (natural batches) | Focal Loss handles imbalance internally; no sampler needed |
 | Bias init | `_init_final_bias(pos_ratio)` | Final layer bias initialized so initial prediction ≈ dataset positive rate (~8 %), breaking symmetry |
 | **Gradient clipping** | **Max norm = 1.0** | Tighter clip prevents spikes; grad norms at batch 0 are already small (~0.6) |
@@ -418,15 +418,19 @@ All stdout/stderr from the training script is tee'd to `models/training_log.txt`
 | Data loading | `SequenceDataset` with `mmap_mode='r'`, **`num_workers=0`** | Raw sequences streamed from disk; STFT computed on-the-fly in `__getitem__`. Workers disabled to prevent `/dev/shm` exhaustion on cloud VMs. |
 | Batch size | **64** | Better gradient estimates with long sequences |
 | Optimiser | Adam, **lr=1e-4**, weight_decay=1e-4 | Lower LR prevents overshooting |
-| **Loss** | **`FocalLoss(gamma=2.0, alpha=0.75)`** | Replaces BCE + pos_weight; see §6.1 evolution |
+| **Loss** | **`FocalLoss(gamma=2.0, alpha=0.90)`** | `alpha=0.90` gives 9× positive weighting for 11:1 imbalance; stronger than previous 0.75 |
 | Sampler | **None** (natural batches, shuffle=True) | Focal Loss handles imbalance internally |
 | Bias init | Final layer bias → `ln(pos_ratio / (1−pos_ratio))` | Breaks 0.5-symmetry trap |
 | **LR warmup** | **Linear, 5 epochs** | Prevents early-epoch collapse |
 | Early stopping | **Patience=15** on validation AUC | More patience needed with lower LR |
 | LR scheduler (post-warmup) | ReduceLROnPlateau (patience=5, factor=0.5) | — |
 | **Gradient clipping** | **Max norm = 1.0** | Tighter clip prevents gradient spikes |
+| Dropout | **0.5** (LSTM + FC) | Increased from 0.2 after severe overfitting observed (train loss 0.012 vs val loss 0.152) |
 | Augmentation | Gaussian noise σ=0.01; channel dropout p=0.1 | Active in training loop |
+| Classification threshold | **0.20** (not 0.50) | Tuned for 11:1 imbalance; sensitivity evaluated at this threshold |
 | Checkpoints | `lstm_best.pt` + `lstm_latest.pt` | Best by val AUC, and most recent epoch |
+| Output folders | Timestamped subdirectories inside `models/` | e.g. `models/20260115_143022/` — preserves older runs |
+| Post-training plots | 7 PNG images generated automatically | Loss curve, val AUC, sens/spec, LR schedule, ROC, PR, confusion matrices |
 | Live monitor | Terminal table: Epoch / Train Loss / Val Loss / Val AUC / Sens / Spec / LR / Time / ETA / Status | Updated every epoch |
 | First-batch diagnostics | Prints pred mean/std/min/max, grad norm, per-layer gradient norms | Debug only; confirms model is not stuck |
 
@@ -448,17 +452,28 @@ All stdout/stderr from the training script is tee'd to `models/training_log.txt`
 
 ### 12.5 Outputs After Training
 
+Each run creates a **timestamped subdirectory** under `models/` (e.g., `models/20260115_143022/`) so older runs are never overwritten.
+
 ```
 models/
-├── lstm_best.pt              # Best LSTM checkpoint (by validation AUC)
-├── lstm_latest.pt            # Last epoch checkpoint (survival net)
-├── lstm_history.json         # Per-epoch loss, AUC, LR, time
-├── xgboost_model.pkl         # Trained XGBoost model
-├── xgboost_metrics.json      # Validation AUC/accuracy/precision/recall/F1
-├── test_results.json         # Test-set evaluation (LSTM + XGBoost)
-├── lstm_test_preds.npy       # LSTM predictions on held-out test patients
-├── xgb_test_preds.npy        # XGBoost predictions on held-out test patients
-└── training_log.txt          # Full stdout/stderr from the run
+└── 20260115_143022/
+    ├── lstm_best.pt              # Best LSTM checkpoint (by validation AUC)
+    ├── lstm_latest.pt            # Last epoch checkpoint
+    ├── lstm_history.json         # Per-epoch loss, AUC, sens, spec, LR, time
+    ├── xgboost_model.pkl         # Trained XGBoost model
+    ├── xgboost_metrics.json      # Validation AUC/accuracy/precision/recall/F1
+    ├── test_results.json         # Test-set evaluation (LSTM + XGBoost)
+    ├── test_labels.npy           # True test labels (for plot generation)
+    ├── lstm_test_preds.npy       # LSTM predictions on held-out test patients
+    ├── xgb_test_preds.npy        # XGBoost predictions on held-out test patients
+    ├── loss_curve.png            # Train/val loss over epochs
+    ├── val_auc_curve.png         # Validation AUC over epochs
+    ├── sens_spec_curve.png       # Validation sensitivity/specificity over epochs
+    ├── lr_schedule.png           # Learning rate schedule
+    ├── roc_curve.png             # ROC curves (test set)
+    ├── pr_curve.png              # Precision-Recall curves (test set)
+    ├── confusion_matrix_lstm.png # LSTM confusion matrix (test set)
+    └── confusion_matrix_xgboost.png  # XGBoost confusion matrix (test set)
 ```
 
 These outputs are the inputs for the Attention Fusion Layer.
@@ -480,7 +495,7 @@ These outputs are the inputs for the Attention Fusion Layer.
 | **Double class-imbalance correction** | Original code used both `WeightedRandomSampler` AND `pos_weight≈10` simultaneously. Fixed to use **Focal Loss alone** (no sampler, no pos_weight). |
 | **VRAM exhaustion on RTX 4050 6 GB** | Batch size 64 + self-attention over 1280 timesteps ≈ 6–7 GB. Mitigated by using 1 LSTM layer instead of 2, plus memory-mapped `SequenceDataset`. |
 | **DataLoader shared-memory crash** (`RuntimeError: unable to allocate shared memory`) | Default `num_workers=4` on CUDA causes `/dev/shm` exhaustion during multi-worker batch collation. Fixed by setting **`num_workers=0`** for train, validation, and test DataLoaders. |
-| **XGBoost 2.0+ API break** | `early_stopping_rounds` and `use_label_encoder` were removed in different XGBoost versions. Fixed by inspecting `fit()` signature at runtime to choose the correct parameter (`early_stopping_rounds`, `callbacks`, or none), and by removing the deprecated `use_label_encoder` argument. |
+| **XGBoost 2.0+ API break** | `early_stopping_rounds` and `use_label_encoder` were removed in different XGBoost versions. Signature inspection failed because these parameters are handled via `**kwargs`. Fixed by using nested `try/except` blocks that attempt `callbacks`, then `early_stopping_rounds`, then fall back to training without early stopping. |
 | **`python` command missing on Ubuntu** | `run_all.sh` now auto-detects `python3` then `python`, and fails gracefully if neither exists. |
 | **Augmentation defined but never applied** | `config.yaml` listed Gaussian noise and channel dropout, but the training loop never executed them. Fixed — augmentation is now active in the batch loop. |
 | **Per-epoch checkpoints bloating disk** | Originally saved every epoch. Fixed to keep only `lstm_best.pt` and `lstm_latest.pt`. |
@@ -489,5 +504,9 @@ These outputs are the inputs for the Attention Fusion Layer.
 | **LR 1e-3 too aggressive** | Caused overshooting before model found useful gradient signal. Fixed by reducing to **1e-4** and adding **5-epoch linear warmup**. |
 | **Raw 1280-step LSTM unstable** | Feeding raw 1280 timesteps directly into BiLSTM causes gradient vanishing across the long sequence. Fixed by adding a **1D CNN front-end** (3 conv layers, kernel=5, stride=2) that reduces sequence length 1280 → 160 before the LSTM sees it. |
 | **LSTM failing to learn generalizable features** (val AUC ~0.50–0.60, collapsing to 0.50) | Raw waveform input lacks the time-frequency structure that BiLSTMs need for EEG pattern recognition. Fixed by switching input to **STFT magnitude spectrograms** (70 freq bins × ~21 time frames) and replacing the 1D CNN with a **2D CNN** (Conv2d, stride=(2,1)) that compresses frequency while preserving temporal resolution for the LSTM. |
+| **LSTM severe overfitting** (train loss 0.012 vs val loss 0.152 after 16 epochs) | STFT-CNN-BiLSTM with 575K parameters overfits quickly on patient-level splits. Fixed by increasing **dropout from 0.2 to 0.5** across LSTM and FC layers. |
+| **CPU at 100%, GPU at ~15% during training** | Expected behavior. STFT is computed on-the-fly in `SequenceDataset.__getitem__` with `num_workers=0`. `pin_memory=True` and `non_blocking=True` are active for CUDA I/O, but the CPU is the bottleneck. Pre-computing STFT arrays to disk would eliminate this. |
+| **Sensitivity ≈ 0.00 at threshold=0.5** | On 11:1 imbalanced data, models learn low probabilities. `threshold=0.5` is inappropriate. Fixed by adding configurable `classification_threshold=0.20` and evaluating sensitivity/specificity at this point. |
+| **FocalLoss alpha=0.75 too weak** | `alpha=0.75` gives only 3× positive weighting, insufficient for 11:1 imbalance. Model still learned to predict near-constant low probabilities. Fixed by increasing to **`alpha=0.90`** (9× weighting). |
 | **Gradient clip 5.0 too loose** | Allowed gradient spikes that destabilized training. Fixed by tightening to **1.0**. |
 

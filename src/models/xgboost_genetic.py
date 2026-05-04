@@ -9,8 +9,6 @@ Input:  [N, 233]  (221 EEG features + 12 genetic features)
 Output: P_seizure ∈ [0,1]
 """
 
-import inspect
-
 import numpy as np
 import xgboost as xgb
 from sklearn.metrics import roc_auc_score, classification_report
@@ -63,9 +61,7 @@ def train_xgboost(X_train, y_train, X_val, y_val, config):
     xgb_cfg = config.get("xgboost", {})
     early_stop = xgb_cfg.get("early_stopping_rounds", 20)
 
-    # Detect XGBoost version capabilities by inspecting fit() signature
-    fit_params = set(inspect.signature(model.fit).parameters.keys())
-
+    # Robust early-stopping: try modern API, then legacy, then none.
     fit_kwargs = {
         "X": X_train,
         "y": y_train,
@@ -73,14 +69,27 @@ def train_xgboost(X_train, y_train, X_val, y_val, config):
         "verbose": 50,
     }
 
-    if "early_stopping_rounds" in fit_params:
-        fit_kwargs["early_stopping_rounds"] = early_stop
-    elif "callbacks" in fit_params:
-        fit_kwargs["callbacks"] = [xgb.callback.EarlyStopping(rounds=early_stop, save_best=True)]
-    else:
-        print("  [WARNING] XGBoost fit() does not support early_stopping_rounds or callbacks; training without early stopping.")
-
-    model.fit(**fit_kwargs)
+    try:
+        # XGBoost >= 2.0 style
+        callbacks = [xgb.callback.EarlyStopping(rounds=early_stop, save_best=True)]
+        fit_kwargs["callbacks"] = callbacks
+        model.fit(**fit_kwargs)
+        print(f"  Early stopping via callbacks (rounds={early_stop})")
+    except TypeError as e:
+        if "callbacks" not in str(e).lower():
+            raise
+        fit_kwargs.pop("callbacks", None)
+        try:
+            # XGBoost 1.x style
+            fit_kwargs["early_stopping_rounds"] = early_stop
+            model.fit(**fit_kwargs)
+            print(f"  Early stopping via early_stopping_rounds={early_stop}")
+        except TypeError as e2:
+            if "early_stopping_rounds" not in str(e2).lower():
+                raise
+            fit_kwargs.pop("early_stopping_rounds", None)
+            print("  [WARNING] XGBoost does not support early stopping; training all estimators")
+            model.fit(**fit_kwargs)
 
     # Evaluate
     y_pred_proba = model.predict_proba(X_val)[:, 1]
@@ -98,4 +107,3 @@ def train_xgboost(X_train, y_train, X_val, y_val, config):
     }
 
     return model, metrics
-

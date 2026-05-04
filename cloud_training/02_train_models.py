@@ -17,8 +17,10 @@ Usage:
 
 import argparse
 import json
+import os
 import sys
 import time
+from datetime import datetime
 from pathlib import Path
 
 import numpy as np
@@ -28,7 +30,10 @@ import torch.nn as nn
 import torch.optim as optim
 import yaml
 from scipy import signal
-from sklearn.metrics import roc_auc_score, classification_report
+from sklearn.metrics import (
+    roc_auc_score, classification_report, roc_curve,
+    precision_recall_curve, confusion_matrix, average_precision_score,
+)
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 
@@ -256,6 +261,8 @@ def train_lstm(data, config, device, output_dir):
     print(f"Train: {total_seqs:,} epochs, ~{mem_gb:.1f} GB if loaded fully")
     print(f"Val:   {len(val_lab):,} epochs")
     print(f"Device: {device}")
+    print(f"CUDA I/O: pin_memory={use_cuda}, non_blocking=True")
+    print("  NOTE: CPU at 100% is expected — STFT is computed on CPU with num_workers=0")
 
     # ── DataLoaders (natural distribution, NO sampler) ──
     use_cuda = device.type == "cuda"
@@ -286,8 +293,10 @@ def train_lstm(data, config, device, output_dir):
     ratio = n_neg / max(n_pos, 1)
     pos_ratio = n_pos / len(train_lab)
     print(f"Class ratio {ratio:.1f}:1  pos_ratio={pos_ratio:.4f}")
-    print(f"Loss: FocalLoss(gamma=2, alpha=0.75)  (NO sampler — natural batches)")
-    criterion = FocalLoss(gamma=2.0, alpha=0.75)
+    focal_alpha = cfg.get("focal_alpha", 0.90)
+    focal_gamma = cfg.get("focal_gamma", 2.0)
+    print(f"Loss: FocalLoss(gamma={focal_gamma}, alpha={focal_alpha})  (NO sampler — natural batches)")
+    criterion = FocalLoss(gamma=focal_gamma, alpha=focal_alpha)
 
     # Break symmetry: init final bias to predict baseline positive rate
     _init_final_bias(model, pos_ratio)
@@ -317,6 +326,8 @@ def train_lstm(data, config, device, output_dir):
     epoch_start_global = time.time()
     warmup_epochs = 5
 
+    threshold = cfg.get("classification_threshold", 0.20)
+    print(f"\n  Classification threshold: {threshold}  (NOT 0.5 — tuned for imbalance)")
     # Header for status monitor
     print(f"\n  {'Epoch':>5} │ {'Train Loss':>10} │ {'Val Loss':>10} │ {'Val AUC':>8} │ "
           f"{'Sens':>6} │ {'Spec':>6} │ {'LR':>10} │ {'Time':>6} │ {'ETA':>8} │ Status")
@@ -418,11 +429,13 @@ def train_lstm(data, config, device, output_dir):
         history.append({
             "epoch": epoch, "train_loss": avg_train_loss,
             "val_loss": avg_val_loss, "val_auc": val_auc,
+            "val_sens": float(sens), "val_spec": float(spec),
             "lr": lr_now, "time_sec": elapsed,
         })
 
-        # Calculate sensitivity at threshold=0.5
-        pred_bin = (preds_arr >= 0.5).astype(int)
+        # Calculate sensitivity/specificity at configured threshold
+        threshold = cfg.get("classification_threshold", 0.20)
+        pred_bin = (preds_arr >= threshold).astype(int)
         sens = (pred_bin[labels_arr == 1] == 1).mean() if (labels_arr == 1).any() else 0
         spec = (pred_bin[labels_arr == 0] == 0).mean() if (labels_arr == 0).any() else 0
 
@@ -516,17 +529,21 @@ def train_xgb(data, config, output_dir):
 # ============================================================
 # Test Evaluation
 # ============================================================
-def evaluate_test(lstm_model, xgb_model, data, device, output_dir):
+def evaluate_test(lstm_model, xgb_model, data, device, output_dir, threshold=0.20):
     """Evaluate both models on held-out test patients."""
     print("\n" + "=" * 60)
     print("TEST SET EVALUATION")
     print("=" * 60)
+    print(f"Classification threshold: {threshold}")
 
     test_seq, test_feat, test_lab = data["test"]
     print(f"Test: {len(test_lab):,} epochs  ({int((test_lab==1).sum()):,} preictal)")
     print(f"Test patients: {data['test_pats']}")
 
     results = {}
+
+    # Save test labels for plot generation
+    np.save(output_dir / "test_labels.npy", test_lab)
 
     # ── LSTM ──
     if lstm_model is not None:
@@ -548,24 +565,27 @@ def evaluate_test(lstm_model, xgb_model, data, device, output_dir):
 
         preds = np.array(preds)
         auc = roc_auc_score(test_lab, preds)
-        pred_bin = (preds >= 0.5).astype(int)
+        pred_bin = (preds >= threshold).astype(int)
         report = classification_report(test_lab, pred_bin, output_dict=True, zero_division=0)
 
         sens = report.get("1.0", report.get("1", {})).get("recall", 0)
         spec = report.get("0.0", report.get("0", {})).get("recall", 0)
+        ap = average_precision_score(test_lab, preds)
 
         print(f"  AUC:         {auc:.4f}")
+        print(f"  AP:          {ap:.4f}")
         print(f"  Accuracy:    {report['accuracy']:.4f}")
         print(f"  Sensitivity: {sens:.4f}")
         print(f"  Specificity: {spec:.4f}")
 
         results["lstm"] = {
-            "auc": float(auc), "accuracy": float(report["accuracy"]),
+            "auc": float(auc), "ap": float(ap),
+            "accuracy": float(report["accuracy"]),
             "sensitivity": float(sens), "specificity": float(spec),
+            "threshold": threshold,
             "classification_report": report,
         }
 
-        # Save predictions for later fusion
         np.save(output_dir / "lstm_test_preds.npy", preds)
 
     # ── XGBoost ──
@@ -573,20 +593,24 @@ def evaluate_test(lstm_model, xgb_model, data, device, output_dir):
         print("\n--- XGBoost ---")
         xgb_preds = xgb_model.predict_proba(test_feat)[:, 1]
         auc = roc_auc_score(test_lab, xgb_preds)
-        pred_bin = (xgb_preds >= 0.5).astype(int)
+        pred_bin = (xgb_preds >= threshold).astype(int)
         report = classification_report(test_lab, pred_bin, output_dict=True, zero_division=0)
 
         sens = report.get("1.0", report.get("1", {})).get("recall", 0)
         spec = report.get("0.0", report.get("0", {})).get("recall", 0)
+        ap = average_precision_score(test_lab, xgb_preds)
 
         print(f"  AUC:         {auc:.4f}")
+        print(f"  AP:          {ap:.4f}")
         print(f"  Accuracy:    {report['accuracy']:.4f}")
         print(f"  Sensitivity: {sens:.4f}")
         print(f"  Specificity: {spec:.4f}")
 
         results["xgboost"] = {
-            "auc": float(auc), "accuracy": float(report["accuracy"]),
+            "auc": float(auc), "ap": float(ap),
+            "accuracy": float(report["accuracy"]),
             "sensitivity": float(sens), "specificity": float(spec),
+            "threshold": threshold,
             "classification_report": report,
         }
 
@@ -630,8 +654,11 @@ def main():
         device = torch.device("cpu")
         print("WARNING: No CUDA GPU detected — training will be very slow on CPU")
 
-    output_dir = PROJECT_ROOT / "models"
+    # ── Timestamped output directory ──
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    output_dir = PROJECT_ROOT / "models" / timestamp
     output_dir.mkdir(parents=True, exist_ok=True)
+    print(f"\nOutput directory: {output_dir}")
 
     # ── Load data ──
     data = load_all_data(config, max_epochs_per_patient=args.max_epochs_per_patient)
@@ -639,6 +666,7 @@ def main():
     # ── Train ──
     lstm_model = None
     xgb_model = None
+    history = []
 
     if not args.xgb_only:
         lstm_model, best_auc, history = train_lstm(data, config, device, output_dir)
@@ -654,18 +682,22 @@ def main():
         lstm_model.to(device)
 
     # ── Test evaluation ──
-    results = evaluate_test(lstm_model, xgb_model, data, device, output_dir)
+    threshold = config.get("lstm", {}).get("classification_threshold", 0.20)
+    results = evaluate_test(lstm_model, xgb_model, data, device, output_dir, threshold)
+
+    # ── Generate plots ──
+    generate_training_plots(history, results, output_dir, threshold)
 
     # ── Summary ──
     print("\n" + "=" * 60)
     print("TRAINING COMPLETE")
     print("=" * 60)
     if "lstm" in results:
-        print(f"  LSTM  — AUC: {results['lstm']['auc']:.4f}  "
+        print(f"  LSTM  — AUC: {results['lstm']['auc']:.4f}  AP: {results['lstm']['ap']:.4f}  "
               f"Sens: {results['lstm']['sensitivity']:.4f}  "
               f"Spec: {results['lstm']['specificity']:.4f}")
     if "xgboost" in results:
-        print(f"  XGB   — AUC: {results['xgboost']['auc']:.4f}  "
+        print(f"  XGB   — AUC: {results['xgboost']['auc']:.4f}  AP: {results['xgboost']['ap']:.4f}  "
               f"Sens: {results['xgboost']['sensitivity']:.4f}  "
               f"Spec: {results['xgboost']['specificity']:.4f}")
 
@@ -676,6 +708,139 @@ def main():
     print(f"    test_results.json     — test evaluation")
     print(f"    lstm_test_preds.npy   — LSTM test predictions (for fusion)")
     print(f"    xgb_test_preds.npy    — XGBoost test predictions (for fusion)")
+    print(f"    *.png                 — training plots")
+
+
+# ============================================================
+# Plot Generation
+# ============================================================
+def generate_training_plots(history, results, output_dir, threshold):
+    """Generate and save training diagnostic plots."""
+    try:
+        import matplotlib
+        matplotlib.use("Agg")  # headless backend
+        import matplotlib.pyplot as plt
+    except ImportError:
+        print("  [WARNING] matplotlib not installed; skipping plot generation")
+        return
+
+    if not history:
+        print("  [WARNING] No training history; skipping plot generation")
+        return
+
+    figs = []
+    epochs = [h["epoch"] for h in history]
+
+    # 1. Loss curves
+    fig, ax = plt.subplots(figsize=(8, 5))
+    ax.plot(epochs, [h["train_loss"] for h in history], label="Train Loss", marker="o", markersize=3)
+    ax.plot(epochs, [h["val_loss"] for h in history], label="Val Loss", marker="o", markersize=3)
+    ax.set_xlabel("Epoch")
+    ax.set_ylabel("Focal Loss")
+    ax.set_title("Training & Validation Loss")
+    ax.legend()
+    ax.grid(True, alpha=0.3)
+    figs.append(("loss_curve.png", fig))
+
+    # 2. Validation AUC
+    fig, ax = plt.subplots(figsize=(8, 5))
+    ax.plot(epochs, [h["val_auc"] for h in history], marker="o", markersize=4, color="tab:green")
+    ax.axhline(0.5, color="red", linestyle="--", alpha=0.5, label="Random (AUC=0.5)")
+    ax.set_xlabel("Epoch")
+    ax.set_ylabel("Validation AUC")
+    ax.set_title("Validation AUC Over Epochs")
+    ax.legend()
+    ax.grid(True, alpha=0.3)
+    figs.append(("val_auc_curve.png", fig))
+
+    # 3. Validation Sensitivity / Specificity
+    fig, ax = plt.subplots(figsize=(8, 5))
+    ax.plot(epochs, [h.get("val_sens", 0) for h in history], label="Sensitivity", marker="o", markersize=3)
+    ax.plot(epochs, [h.get("val_spec", 0) for h in history], label="Specificity", marker="o", markersize=3)
+    ax.set_xlabel("Epoch")
+    ax.set_ylabel("Rate")
+    ax.set_title(f"Validation Sensitivity / Specificity (threshold={threshold})")
+    ax.legend()
+    ax.grid(True, alpha=0.3)
+    figs.append(("sens_spec_curve.png", fig))
+
+    # 4. Learning Rate schedule
+    fig, ax = plt.subplots(figsize=(8, 5))
+    ax.plot(epochs, [h["lr"] for h in history], marker="o", markersize=3, color="tab:orange")
+    ax.set_xlabel("Epoch")
+    ax.set_ylabel("Learning Rate")
+    ax.set_title("Learning Rate Schedule")
+    ax.set_yscale("log")
+    ax.grid(True, alpha=0.3)
+    figs.append(("lr_schedule.png", fig))
+
+    # 5. Test ROC curves
+    fig, ax = plt.subplots(figsize=(7, 7))
+    test_labels = np.load(output_dir / "test_labels.npy")
+    for model_name, color in [("lstm", "tab:blue"), ("xgboost", "tab:orange")]:
+        if model_name in results:
+            preds = np.load(output_dir / f"{model_name}_test_preds.npy")
+            fpr, tpr, _ = roc_curve(test_labels, preds)
+            auc = results[model_name]["auc"]
+            ax.plot(fpr, tpr, label=f"{model_name.upper()} (AUC={auc:.3f})", color=color, linewidth=2)
+    ax.plot([0, 1], [0, 1], "k--", alpha=0.5, label="Random")
+    ax.set_xlabel("False Positive Rate")
+    ax.set_ylabel("True Positive Rate")
+    ax.set_title("ROC Curve — Test Set")
+    ax.legend(loc="lower right")
+    ax.grid(True, alpha=0.3)
+    figs.append(("roc_curve.png", fig))
+
+    # 6. Test Precision-Recall curves
+    fig, ax = plt.subplots(figsize=(7, 7))
+    for model_name, color in [("lstm", "tab:blue"), ("xgboost", "tab:orange")]:
+        if model_name in results:
+            preds = np.load(output_dir / f"{model_name}_test_preds.npy")
+            precision, recall, _ = precision_recall_curve(test_labels, preds)
+            ap = results[model_name]["ap"]
+            ax.plot(recall, precision, label=f"{model_name.upper()} (AP={ap:.3f})", color=color, linewidth=2)
+    # Baseline: random classifier
+    baseline = test_labels.mean()
+    ax.axhline(baseline, color="red", linestyle="--", alpha=0.5, label=f"Baseline ({baseline:.3f})")
+    ax.set_xlabel("Recall (Sensitivity)")
+    ax.set_ylabel("Precision")
+    ax.set_title("Precision-Recall Curve — Test Set")
+    ax.legend(loc="lower left")
+    ax.grid(True, alpha=0.3)
+    figs.append(("pr_curve.png", fig))
+
+    # 7. Test Confusion Matrices
+    for model_name in ["lstm", "xgboost"]:
+        if model_name in results:
+            preds = np.load(output_dir / f"{model_name}_test_preds.npy")
+            pred_bin = (preds >= threshold).astype(int)
+            cm = confusion_matrix(test_labels, pred_bin)
+            fig, ax = plt.subplots(figsize=(6, 5))
+            im = ax.imshow(cm, interpolation="nearest", cmap=plt.cm.Blues)
+            ax.figure.colorbar(im, ax=ax)
+            ax.set(
+                xticks=[0, 1], yticks=[0, 1],
+                xticklabels=["Interictal", "Preictal"],
+                yticklabels=["Interictal", "Preictal"],
+                title=f"Confusion Matrix — {model_name.upper()} (threshold={threshold})",
+                ylabel="True label",
+                xlabel="Predicted label",
+            )
+            # Annotate cells
+            thresh = cm.max() / 2.0
+            for i in range(2):
+                for j in range(2):
+                    ax.text(j, i, format(cm[i, j], ","),
+                            ha="center", va="center",
+                            color="white" if cm[i, j] > thresh else "black",
+                            fontsize=12, fontweight="bold")
+            figs.append((f"confusion_matrix_{model_name}.png", fig))
+
+    # Save all figures
+    for fname, fig in figs:
+        fig.savefig(output_dir / fname, dpi=150, bbox_inches="tight")
+        plt.close(fig)
+    print(f"  Plots saved ({len(figs)} images) → {output_dir}/")
 
 
 if __name__ == "__main__":
