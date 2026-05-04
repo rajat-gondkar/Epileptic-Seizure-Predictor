@@ -299,15 +299,18 @@ Since CHB-MIT provides no real genetic data, profiles are simulated using:
 
 ## 6. Model Architecture
 
-### 6.1 EEG Branch — Bidirectional LSTM
+### 6.1 EEG Branch — STFT-CNN-Bidirectional LSTM
 
 | Component | Specification |
 |-----------|--------------|
-| Input | Raw EEG sequence [batch, T=1280, C=17] |
-| **CNN Front-End** | **3× Conv1D** (kernel=5, stride=2) with BatchNorm + ReLU |
-|   Conv1 | 17 → 32 channels, 1280 → **640** timesteps |
-|   Conv2 | 32 → 64 channels, 640 → **320** timesteps |
-|   Conv3 | 64 → **128** channels, 320 → **160** timesteps |
+| Input | STFT magnitude spectrogram [batch, C=17, F=70, T_stft=21] |
+| **STFT parameters** | nperseg=256, noverlap=192, fs=256 Hz → 70 freq bins (1–70 Hz), ~21 time frames |
+| Preprocessing | Log-scaled magnitude: `log(|STFT| + 1e-8)` |
+| **CNN Front-End** | **3× Conv2D** (kernel=(3,3), stride=(2,1)) with BatchNorm + ReLU |
+|   Conv1 | 17 → 32 channels, freq 70 → **35**, time preserved |
+|   Conv2 | 32 → 64 channels, freq 35 → **18**, time preserved |
+|   Conv3 | 64 → **128** channels, freq 18 → **9**, time preserved |
+| Pool | AdaptiveAvgPool2d((1, None)) → [batch, 128, 1, T] → squeeze → [batch, T, 128] |
 | Layer 1 | Bidirectional LSTM; hidden_size=128; **num_layers=1**; **dropout=0.2** |
 | Effective hidden dim | 256 (bidirectional) |
 | Layer 2 | Self-attention over LSTM output timesteps |
@@ -394,6 +397,7 @@ Ubuntu/Debian systems often lack a `python` command. `run_all.sh` now probes for
 | `--skip-download` | Skips EDF downloads but still runs preprocessing if `.npy` files are missing |
 | `--train-only` | Skips download AND preprocessing; jumps straight to Step 2 |
 | `--quick-test` | 3 LSTM epochs, 2000 epochs/patient cap — smoke test |
+| `--xgboost` | Skips LSTM training; runs only XGBoost (use with `--train-only`) |
 
 **Pipeline progress tracker:**
 The shell script prints `[1/3]`, `[2/3]`, `[3/3]` step headers with elapsed times and a final total duration.
@@ -407,11 +411,11 @@ All stdout/stderr from the training script is tee'd to `models/training_log.txt`
 
 | Parameter | Value | Notes |
 |-----------|-------|-------|
-| Architecture | Bidirectional LSTM, **1 layer**, hidden=128, **dropout=0.2** | Reduced to 1 layer for initial stability debugging |
+| Architecture | **STFT-CNN-BiLSTM**; 3× Conv2D on spectrograms + 1-layer BiLSTM | STFT (70 freq × ~21 time frames) → 2D CNN (freq pool) → BiLSTM. Replaces raw-waveform 1D CNN. |
 | Attention | Self-attention over all timesteps | — |
 | Total parameters | ~759,000 | — |
 | Device | CUDA auto-detect; CPU fallback | MPS explicitly avoided (Apple Silicon bottleneck) |
-| Data loading | `SequenceDataset` with `mmap_mode='r'`, **`num_workers=0`** | Streams from disk; no full-RAM load. Workers disabled to prevent `/dev/shm` exhaustion on cloud VMs. |
+| Data loading | `SequenceDataset` with `mmap_mode='r'`, **`num_workers=0`** | Raw sequences streamed from disk; STFT computed on-the-fly in `__getitem__`. Workers disabled to prevent `/dev/shm` exhaustion on cloud VMs. |
 | Batch size | **64** | Better gradient estimates with long sequences |
 | Optimiser | Adam, **lr=1e-4**, weight_decay=1e-4 | Lower LR prevents overshooting |
 | **Loss** | **`FocalLoss(gamma=2.0, alpha=0.75)`** | Replaces BCE + pos_weight; see §6.1 evolution |
@@ -476,13 +480,14 @@ These outputs are the inputs for the Attention Fusion Layer.
 | **Double class-imbalance correction** | Original code used both `WeightedRandomSampler` AND `pos_weight≈10` simultaneously. Fixed to use **Focal Loss alone** (no sampler, no pos_weight). |
 | **VRAM exhaustion on RTX 4050 6 GB** | Batch size 64 + self-attention over 1280 timesteps ≈ 6–7 GB. Mitigated by using 1 LSTM layer instead of 2, plus memory-mapped `SequenceDataset`. |
 | **DataLoader shared-memory crash** (`RuntimeError: unable to allocate shared memory`) | Default `num_workers=4` on CUDA causes `/dev/shm` exhaustion during multi-worker batch collation. Fixed by setting **`num_workers=0`** for train, validation, and test DataLoaders. |
-| **XGBoost 2.0+ API break** | `early_stopping_rounds` removed from `.fit()` and `use_label_encoder` removed from `XGBClassifier`. Fixed with `try/except` fallback for early stopping, and by removing the `use_label_encoder` argument. |
+| **XGBoost 2.0+ API break** | `early_stopping_rounds` and `use_label_encoder` were removed in different XGBoost versions. Fixed by inspecting `fit()` signature at runtime to choose the correct parameter (`early_stopping_rounds`, `callbacks`, or none), and by removing the deprecated `use_label_encoder` argument. |
 | **`python` command missing on Ubuntu** | `run_all.sh` now auto-detects `python3` then `python`, and fails gracefully if neither exists. |
 | **Augmentation defined but never applied** | `config.yaml` listed Gaussian noise and channel dropout, but the training loop never executed them. Fixed — augmentation is now active in the batch loop. |
 | **Per-epoch checkpoints bloating disk** | Originally saved every epoch. Fixed to keep only `lstm_best.pt` and `lstm_latest.pt`. |
 | **No persistent training log** | Terminal output was ephemeral. Fixed — `run_all.sh` now pipes all output to `models/training_log.txt` via `tee`. |
 | **LSTM all-0/all-1 oscillation** (AUC≈0.5, Sens/Spec flip-flopping) | `pos_weight=3` was too weak for 11:1 imbalance; model oscillated between predicting all-negative and all-positive. Fixed by switching to **FocalLoss** and removing the sampler. |
 | **LR 1e-3 too aggressive** | Caused overshooting before model found useful gradient signal. Fixed by reducing to **1e-4** and adding **5-epoch linear warmup**. |
-| **Raw 1280-step LSTM unstable** | Feeding raw 1280 timesteps directly into BiLSTM causes gradient vanishing across the long sequence. Fixed by adding a **1D CNN front-end** (3 conv layers, kernel=5, stride=2) that reduces sequence length 1280 → 160 before the LSTM sees it. This is the standard architecture for CHB-MIT seizure prediction.
+| **Raw 1280-step LSTM unstable** | Feeding raw 1280 timesteps directly into BiLSTM causes gradient vanishing across the long sequence. Fixed by adding a **1D CNN front-end** (3 conv layers, kernel=5, stride=2) that reduces sequence length 1280 → 160 before the LSTM sees it. |
+| **LSTM failing to learn generalizable features** (val AUC ~0.50–0.60, collapsing to 0.50) | Raw waveform input lacks the time-frequency structure that BiLSTMs need for EEG pattern recognition. Fixed by switching input to **STFT magnitude spectrograms** (70 freq bins × ~21 time frames) and replacing the 1D CNN with a **2D CNN** (Conv2d, stride=(2,1)) that compresses frequency while preserving temporal resolution for the LSTM. |
 | **Gradient clip 5.0 too loose** | Allowed gradient spikes that destabilized training. Fixed by tightening to **1.0**. |
 

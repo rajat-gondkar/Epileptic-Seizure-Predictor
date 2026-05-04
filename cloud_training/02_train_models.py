@@ -3,7 +3,7 @@
 Step 2: Train LSTM + XGBoost Models
 ======================================
 Trains both branches of the EEG-Genetic Fusion pipeline:
-  1. BiLSTM with self-attention on raw EEG sequences
+  1. STFT-CNN-BiLSTM with self-attention on STFT spectrograms
   2. XGBoost on 221-dim EEG features
 
 Designed for CUDA GPU (RTX 4050 / T4 / A100 etc).
@@ -27,6 +27,7 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 import yaml
+from scipy import signal
 from sklearn.metrics import roc_auc_score, classification_report
 from torch.utils.data import DataLoader
 from tqdm import tqdm
@@ -168,7 +169,18 @@ class SequenceDataset(torch.utils.data.Dataset):
             local_idx = idx - self.cumlen[arr_idx - 1]
         else:
             local_idx = idx
-        x = torch.from_numpy(np.array(self.seqs[arr_idx][local_idx])).float()
+        x_raw = np.array(self.seqs[arr_idx][local_idx])  # [T=1280, C=17]
+
+        # ── STFT spectrogram: [C, F, T_stft] ──
+        x_np = x_raw.T                                    # [C, T]
+        _, _, Zxx = signal.stft(
+            x_np, fs=256, nperseg=256, noverlap=192,
+            boundary="zeros", padded=True,
+        )
+        spec = np.abs(Zxx[:, 1:71, :])                    # keep 1–70 Hz
+        spec = np.log(spec + 1e-8)                        # log magnitude
+        x = torch.from_numpy(spec).float()                # [C, F, T]
+
         y = torch.tensor(self.labels[idx], dtype=torch.float32).unsqueeze(0)
         return x, y
 
@@ -258,7 +270,7 @@ def train_lstm(data, config, device, output_dir):
 
     # ── Model ──
     model = EEGCNNLSTM(
-        input_size=cfg["input_size"],
+        input_channels=cfg["input_size"],
         hidden_size=cfg["hidden_size"],
         num_layers=cfg["num_layers"],
         dropout=cfg["dropout"],

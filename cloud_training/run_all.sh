@@ -21,6 +21,9 @@
 #
 # To only train (skip download AND preprocess):
 #   bash cloud_training/run_all.sh --train-only
+#
+# To only train XGBoost (skip LSTM):
+#   bash cloud_training/run_all.sh --train-only --xgboost
 # ============================================================
 
 set -e  # Exit on any error
@@ -54,6 +57,7 @@ echo ""
 QUICK_TEST=""
 SKIP_DOWNLOAD=false
 TRAIN_ONLY=false
+XGB_ONLY=""
 
 for arg in "$@"; do
     case $arg in
@@ -68,6 +72,10 @@ for arg in "$@"; do
         --train-only)
             TRAIN_ONLY=true
             echo "⏭ Training only (skip download + preprocess)"
+            ;;
+        --xgboost)
+            XGB_ONLY="--xgb-only"
+            echo "⏭ XGBoost only (skip LSTM training)"
             ;;
     esac
 done
@@ -142,7 +150,7 @@ echo "Start time: $(date)"
 echo ""
 
 mkdir -p models
-$PYTHON cloud_training/02_train_models.py $QUICK_TEST 2>&1 | tee models/training_log.txt
+$PYTHON cloud_training/02_train_models.py $QUICK_TEST $XGB_ONLY 2>&1 | tee models/training_log.txt
 
 STEP_END=$(date +%s)
 echo ""

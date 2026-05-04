@@ -1,20 +1,22 @@
 #!/usr/bin/env python3
 """
-CNN-LSTM EEG Seizure Prediction Model
-=======================================
-1D CNN front-end (3 layers) extracts local spatial-temporal features from
-raw EEG, reducing sequence length 1280 → ~160 before the BiLSTM sees it.
-This dramatically improves gradient flow compared to feeding raw 1280-step
-sequences directly into the LSTM.
+STFT-CNN-LSTM EEG Seizure Prediction Model
+============================================
+Each 5-second EEG epoch is converted to an STFT magnitude spectrogram
+(17 channels × 70 freq bins × ~21 time frames). A 2D CNN front-end
+compresses the frequency axis while preserving the temporal axis, then
+a BiLSTM processes the resulting time sequence.
 
 Architecture:
-    Input [B, T=1280, C=17]
-    → Conv1D(17→32, k=5, s=2) + BN + ReLU  → [B, 640, 32]
-    → Conv1D(32→64, k=5, s=2) + BN + ReLU  → [B, 320, 64]
-    → Conv1D(64→128, k=5, s=2) + BN + ReLU → [B, 160, 128]
-    → BiLSTM(1 layer, hidden=128)           → [B, 160, 256]
-    → Self-Attention                        → [B, 160, 256]
-    → Global Avg Pool                       → [B, 256]
+    Input [B, C=17, F=70, T_stft=21]  (STFT magnitude spectrograms, log-scaled)
+    → Conv2D(17→32, k=(3,3), s=(2,1)) + BN + ReLU  → [B, 32, 35, 21]
+    → Conv2D(32→64, k=(3,3), s=(2,1)) + BN + ReLU  → [B, 64, 18, 21]
+    → Conv2D(64→128, k=(3,3), s=(2,1)) + BN + ReLU → [B, 128, 9, 21]
+    → AdaptiveAvgPool2d((1, None))                    → [B, 128, 1, 21]
+    → Squeeze + transpose                              → [B, 21, 128]
+    → BiLSTM(1 layer, hidden=128)                     → [B, 21, 256]
+    → Self-Attention                                   → [B, 21, 256]
+    → Global Avg Pool                                  → [B, 256]
     → FC(256→64) + ReLU + Dropout(0.2)
     → FC(64→1) + Sigmoid
 """
@@ -55,37 +57,43 @@ class SelfAttention(nn.Module):
 
 class EEGCNNLSTM(nn.Module):
     """
-    CNN-LSTM for EEG seizure prediction.
+    STFT-CNN-LSTM for EEG seizure prediction.
 
-    Input:  [batch, T=1280, C=17]  (raw EEG sequences)
-    Output: [batch, 1]             (seizure probability)
+    Input:  [batch, C=17, F=70, T_stft]  (STFT magnitude spectrograms)
+    Output: [batch, 1]                   (seizure probability)
     """
 
-    def __init__(self, input_size=17, hidden_size=128, num_layers=1,
+    def __init__(self, input_channels=17, hidden_size=128, num_layers=1,
                  dropout=0.2, embedding_dim=64):
         super().__init__()
 
-        self.input_size = input_size
+        self.input_channels = input_channels
         self.hidden_size = hidden_size
         self.num_layers = num_layers
         self.embedding_dim = embedding_dim
 
-        # ── 1D CNN Front-End ──
-        # Reduces sequence length: 1280 → 640 → 320 → 160
-        self.conv1 = nn.Conv1d(input_size, 32, kernel_size=5, stride=2, padding=2)
-        self.bn1   = nn.BatchNorm1d(32)
+        # ── 2D CNN Front-End on STFT spectrograms ──
+        # Input: [B, 17, 70, T]  (channels, freq, time)
+        # Stride=(2,1) downsamples frequency only, preserves time
+        self.conv1 = nn.Conv2d(input_channels, 32, kernel_size=(3, 3),
+                               stride=(2, 1), padding=(1, 1))
+        self.bn1 = nn.BatchNorm2d(32)
 
-        self.conv2 = nn.Conv1d(32, 64, kernel_size=5, stride=2, padding=2)
-        self.bn2   = nn.BatchNorm1d(64)
+        self.conv2 = nn.Conv2d(32, 64, kernel_size=(3, 3),
+                               stride=(2, 1), padding=(1, 1))
+        self.bn2 = nn.BatchNorm2d(64)
 
-        self.conv3 = nn.Conv1d(64, 128, kernel_size=5, stride=2, padding=2)
-        self.bn3   = nn.BatchNorm1d(128)
+        self.conv3 = nn.Conv2d(64, 128, kernel_size=(3, 3),
+                               stride=(2, 1), padding=(1, 1))
+        self.bn3 = nn.BatchNorm2d(128)
+
+        # Pool frequency dimension to 1, keep time as sequence for LSTM
+        self.freq_pool = nn.AdaptiveAvgPool2d((1, None))
 
         cnn_output_channels = 128
-        cnn_output_length   = 160   # 1280 / 2 / 2 / 2
+        # Time dimension flows through unchanged (stride=1 on time axis)
 
         # ── Bidirectional LSTM ──
-        # Now receives 160 timesteps instead of 1280
         self.lstm = nn.LSTM(
             input_size=cnn_output_channels,
             hidden_size=hidden_size,
@@ -106,33 +114,34 @@ class EEGCNNLSTM(nn.Module):
     def forward(self, x, return_embedding=False):
         """
         Args:
-            x: [batch, T, C] — raw EEG sequences
+            x: [batch, C, F, T] — STFT magnitude spectrograms
             return_embedding: if True, also return the 64-dim embedding
 
         Returns:
             logits: [batch, 1]
             embedding: [batch, 64] (only if return_embedding=True)
         """
-        # x: [B, T, C] → [B, C, T] for Conv1d
-        x = x.transpose(1, 2)   # [B, 17, 1280]
-
-        # Conv block 1: [B, 17, 1280] → [B, 32, 640]
+        # 2D Conv block 1: [B, 17, 70, T] → [B, 32, 35, T]
         x = F.relu(self.bn1(self.conv1(x)))
-        # Conv block 2: [B, 32, 640] → [B, 64, 320]
+        # 2D Conv block 2: [B, 32, 35, T] → [B, 64, 18, T]
         x = F.relu(self.bn2(self.conv2(x)))
-        # Conv block 3: [B, 64, 320] → [B, 128, 160]
+        # 2D Conv block 3: [B, 64, 18, T] → [B, 128, 9, T]
         x = F.relu(self.bn3(self.conv3(x)))
 
-        # Back to [B, T, C] for LSTM
-        x = x.transpose(1, 2)   # [B, 160, 128]
+        # Pool frequency to 1: [B, 128, 9, T] → [B, 128, 1, T]
+        x = self.freq_pool(x)
+        # Squeeze frequency: [B, 128, T]
+        x = x.squeeze(2)
+        # Transpose for LSTM: [B, T, 128]
+        x = x.transpose(1, 2)
 
-        # LSTM: [B, 160, 128] → [B, 160, 256]
+        # LSTM: [B, T, 128] → [B, T, 256]
         lstm_out, _ = self.lstm(x)
 
-        # Self-attention: [B, 160, 256] → [B, 160, 256]
+        # Self-attention: [B, T, 256] → [B, T, 256]
         attended, _ = self.attention(lstm_out)
 
-        # Global average pooling: [B, 160, 256] → [B, 256]
+        # Global average pooling: [B, T, 256] → [B, 256]
         pooled = attended.mean(dim=1)
 
         # FC layers: [B, 256] → [B, 64] → [B, 1]
