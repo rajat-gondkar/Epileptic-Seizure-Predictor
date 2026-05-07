@@ -37,7 +37,7 @@ import xgboost as xgb
 from sklearn.metrics import (
     accuracy_score, average_precision_score, classification_report,
     confusion_matrix, f1_score, mean_absolute_error, mean_squared_error,
-    precision_score, recall_score, roc_auc_score, roc_curve,
+    precision_recall_curve, precision_score, recall_score, roc_auc_score, roc_curve,
 )
 from sklearn.model_selection import StratifiedKFold, train_test_split
 
@@ -186,13 +186,17 @@ def train_model(model, X_train, y_train, X_val, y_val, sw_train):
 
 def safe_classification_metrics(y_true, y_pred, y_prob):
     """Compute metrics safely even when one class is missing."""
+    # Convert to int for sklearn classification_report (uses string keys like "0"/"1" for ints, "0.0"/"1.0" for floats)
+    y_true_i = y_true.astype(int)
+    y_pred_i = y_pred.astype(int)
+
     auc = roc_auc_score(y_true, y_prob) if len(np.unique(y_true)) > 1 else 0.5
     ap = average_precision_score(y_true, y_prob) if y_true.sum() > 0 else 0.0
-    acc = accuracy_score(y_true, y_pred)
-    report = classification_report(y_true, y_pred, output_dict=True, zero_division=0)
-    cm = confusion_matrix(y_true, y_pred)
+    acc = accuracy_score(y_true_i, y_pred_i)
+    report = classification_report(y_true_i, y_pred_i, output_dict=True, zero_division=0)
+    cm = confusion_matrix(y_true_i, y_pred_i)
 
-    # Safe extraction of positive-class metrics
+    # Safe extraction of positive-class metrics (keys are strings "0" and "1" for int labels)
     pos = report.get("1", {"precision": 0.0, "recall": 0.0, "f1-score": 0.0})
 
     # Specificity = TN / (TN + FP)
