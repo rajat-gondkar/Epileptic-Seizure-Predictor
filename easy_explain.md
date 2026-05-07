@@ -134,22 +134,43 @@ Since CHB-MIT patients don't have real genetic data, we simulate realistic genet
 
 ### 6.1 XGBoost Branch (Genetic Model)
 
-XGBoost is a gradient-boosted decision tree model trained **exclusively on genetic features**. It learns which combinations of gene mutations, pLI scores, and PRS values predict seizure risk.
+XGBoost is a gradient-boosted decision tree model trained **exclusively on the 16-dimensional genetic feature vector**. It learns which combinations of gene mutations, pLI scores, PRS values, and engineered burden scores predict seizure risk.
 
 **Training setup:**
 
 | Parameter | Value | Reason |
 |-----------|-------|--------|
-| Input | 12-dim genetic vector per patient | 9 mutations + 2 pLI + 1 PRS |
-| Training data | 1,000 synthetic + 8 real patients | Generated from population frequencies |
-| Estimators | 300 (max) | Number of trees |
-| Max depth | 4 | Prevents overfitting on genetic data |
-| Learning rate | 0.05 | Conservative updates |
-| Scale pos weight | 3 | Moderate imbalance compensation |
+| Input | 16-dim genetic vector per patient | 9 weighted mutations + 2 pLI + 1 PRS + 4 engineered features |
+| Training data | 1,200 synthetic + 8 real patients | Generated from population frequencies with literature risk weights |
+| Estimators | 200 (max) | Low-dim data converges faster |
+| Max depth | 3 | Prevents overfitting on 16 features |
+| Min child weight | 4 | Forces 4+ samples per leaf |
+| Learning rate | 0.03 | Conservative updates |
+| Subsample | 0.75 | Row sampling for regularisation |
+| Colsample bytree | 0.80 | Feature sampling per tree |
+| Reg alpha (L1) | 0.5 | Feature selection on sparse data |
+| Reg lambda (L2) | 2.0 | Smooths CTGAN noise |
+| Scale pos weight | computed fresh | Matches actual genetic label distribution |
+| Sample weights | Real=3×, Synthetic=1× | Trust real patients more |
+| Primary metric | AUC-PR | Better than ROC-AUC for imbalanced data |
 | GPU | CUDA accelerated | Fast histogram-based training |
-| Early stopping | 20 rounds | Stops if validation AUC doesn't improve |
+| Early stopping | 20 rounds | Stops if AUC-PR plateaus |
 
-XGBoost identifies which genetic markers are most predictive (e.g., SCN1A mutation + high PRS). Its patient-level risk score feeds into the final fusion layer alongside the LSTM's epoch-level predictions.
+**Validation strategy:**
+1. **5-fold stratified cross-validation** on the full cohort
+2. **Leave-One-Patient-Out (LOPO)** on the 8 real patients
+
+**Engineered features:**
+- **Mutation burden score:** Sum of all risk-weighted mutation flags (0–7.4)
+- **Ion channel burden:** Sum of ion-channel gene mutations only (0–4.6)
+- **Tier-1 carrier flag:** Binary — does patient carry any Tier-1 mutation?
+- **SCN1A severity proxy:** pLI × SCN1A flag (0 or 1.0)
+
+**SHAP analysis** verifies the model learned real biology:
+- Expected top features: mutation burden, SCN1A, PRS, KCNQ2
+- Red flag if PCDH19 or GABRA1 rank near top
+
+XGBoost's patient-level risk score feeds into the final fusion layer alongside the LSTM's epoch-level predictions.
 
 ### 6.2 EEG Branch — BiLSTM with STFT-CNN (In Progress)
 

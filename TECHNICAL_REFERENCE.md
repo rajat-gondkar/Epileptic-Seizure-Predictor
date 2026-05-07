@@ -239,61 +239,56 @@ For each epoch, 13 features are extracted per channel:
 
 **Implementation**: `src/data_pipeline/genetic_feature_engineering.py`, `src/data_pipeline/prs_computation.py`
 
-### 5.1 12-Dimensional Genetic Feature Vector
+### 5.1 16-Dimensional Genetic Feature Vector
+
+The genetic vector was upgraded from 12 to 16 dimensions using **literature-derived risk weights** instead of raw binary flags, plus 4 engineered aggregate features.
+
+**Gene risk tier list** (from Brunklaus et al. 2022, Thomas et al. 2019):
+
+| Tier | Genes | Risk Weight | Clinical relevance |
+|------|-------|-------------|-------------------|
+| **Tier 1** | SCN1A, KCNQ2, SCN2A | 1.00, 0.95, 0.90 | Severe DEE, drug-resistant epilepsy |
+| **Tier 2** | SCN8A, KCNT1 | 0.85, 0.80 | Significant, variable severity |
+| **Tier 3** | DEPDC5, GRIN2A, GABRA1, PCDH19 | 0.65, 0.55, 0.50, 0.40 | Milder or focal epilepsies |
+
+**Feature vector (16 dimensions):**
 
 | Index | Feature | Type | Source |
 |-------|---------|------|--------|
-| 0 | SCN1A_mutation_flag | Binary {0,1} | ClinVar |
-| 1 | SCN8A_mutation_flag | Binary {0,1} | ClinVar |
-| 2 | KCNQ2_mutation_flag | Binary {0,1} | ClinVar |
-| 3 | SCN2A_mutation_flag | Binary {0,1} | ClinVar |
-| 4 | KCNT1_mutation_flag | Binary {0,1} | ClinVar |
-| 5 | DEPDC5_mutation_flag | Binary {0,1} | ClinVar |
-| 6 | PCDH19_mutation_flag | Binary {0,1} | ClinVar |
-| 7 | GRIN2A_mutation_flag | Binary {0,1} | ClinVar |
-| 8 | GABRA1_mutation_flag | Binary {0,1} | ClinVar |
+| 0–8 | **Weighted mutation flags** (9 genes) | 0 or risk weight | ClinVar carrier frequencies × literature risk |
 | 9 | SCN1A_pLI_score | Continuous [0,1] | gnomAD v2.1.1 |
 | 10 | SCN8A_pLI_score | Continuous [0,1] | gnomAD v2.1.1 |
 | 11 | Polygenic Risk Score | Continuous (standardised) | GWAS Catalog (15 SNPs) |
+| 12 | **Mutation burden score** | Continuous 0–7.4 | Σ (risk weight × flag) across all 9 genes |
+| 13 | **Ion channel gene burden** | Continuous 0–4.6 | Σ (risk weight × flag) for ion-channel genes only |
+| 14 | **Tier-1 carrier flag** | Binary | 1 if any Tier-1 mutation present |
+| 15 | **SCN1A severity proxy** | 0 or 1.0 | pLI_SCN1A × SCN1A_mutation_flag |
 
-### 5.2 Simulated Genetic Profiles (CHB-MIT patients)
+### 5.2 Simulated Genetic Profiles
 
-Since CHB-MIT provides no real genetic data, profiles are simulated using:
+**Training cohort:**
+- **1,200 synthetic patients** generated from population-level carrier frequencies
+- **8 real CHB-MIT patients** with simulated genetic profiles
+- Labels derived from a biologically informed logistic model:
+  - Tier-1 mutations: strong effect (+1.8 log-odds each)
+  - Tier-2 mutations: moderate effect (+0.9 log-odds each)
+  - Tier-3 mutations: weak effect (+0.4 log-odds each)
+  - PRS adds continuous risk modulation
+  - Biological noise: N(0, 0.4)
 
-**Mutation flags** — sampled from population-level carrier frequencies:
+**Mutation carrier frequencies (simulated):**
 
-| Gene | Carrier Frequency Used |
-|------|----------------------|
-| SCN1A | 1.5% |
-| SCN8A | 0.8% |
-| KCNQ2 | 1.0% |
-| SCN2A | 0.7% |
-| KCNT1 | 0.4% |
-| DEPDC5 | 0.5% |
-| PCDH19 | 0.6% |
-| GRIN2A | 0.5% |
-| GABRA1 | 0.3% |
-
-**pLI scores** — fixed constants from gnomAD (not simulated; gene-level population constraint)
-
-**Polygenic Risk Score (PRS)**:
-- Formula: PRS = Σᵢ βᵢ × gᵢ, where βᵢ = ln(ORᵢ) and gᵢ ∈ {0, 1, 2} is the genotype dosage
-- Genotypes sampled from Hardy-Weinberg equilibrium using GWAS risk allele frequencies
-- Cohort-level standardisation applied: PRS_std = (PRS − μ) / σ
-- Simulated PRS distribution (10,000 simulations): mean=0.0, SD=1.0, range=[−3.14, +4.11]
-
-**Simulated genetic profiles (8 patients used for training):**
-
-| Patient | SCN1A | SCN8A | KCNQ2 | SCN2A | KCNT1 | DEPDC5 | PCDH19 | GRIN2A | GABRA1 | SCN1A_pLI | SCN8A_pLI | PRS |
-|---------|-------|-------|-------|-------|-------|--------|--------|--------|--------|-----------|-----------|-----|
-| chb01 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 1.0 | 1.0 | +1.023 |
-| chb03 | 1 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 1.0 | 1.0 | +0.339 |
-| chb05 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 1.0 | 1.0 | +0.092 |
-| chb06 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 1.0 | 1.0 | +1.006 |
-| chb08 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 1.0 | 1.0 | — |
-| chb10 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 1.0 | 1.0 | — |
-| chb16 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 1.0 | 1.0 | — |
-| chb20 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 1.0 | 1.0 | — |
+| Gene | Carrier Frequency | Expected prevalence |
+|------|-------------------|---------------------|
+| SCN1A | 1.5% | Dravet syndrome, most common monogenic epilepsy |
+| SCN8A | 0.8% | Early-onset epileptic encephalopathy |
+| KCNQ2 | 1.0% | Neonatal DEE, second most common |
+| SCN2A | 0.7% | Overlaps SCN1A phenotype |
+| KCNT1 | 0.4% | Severe focal epilepsy of infancy |
+| DEPDC5 | 0.5% | Familial focal epilepsy |
+| PCDH19 | 0.6% | Female-limited cluster seizures |
+| GRIN2A | 0.5% | Sleep-related epilepsy (CSWS, LKS) |
+| GABRA1 | 0.3% | Juvenile myoclonic epilepsy |
 
 ---
 
@@ -341,50 +336,57 @@ Since CHB-MIT provides no real genetic data, profiles are simulated using:
 | Live monitor | Terminal table: Epoch / Train Loss / Val Loss / Val AUC / Sens / Spec / LR / Time / ETA / Status | Updated every epoch |
 | First-batch diagnostics | Prints pred mean/std/min/max, grad norm, per-layer gradient norms | Debug only; confirms model is not stuck |
 
-### 6.2 Genetic Branch — XGBoost on 12-Dim Genetic Features
+### 6.2 Genetic Branch — XGBoost on 16-Dim Genetic Features
 
-The Genetic Branch is a gradient-boosted classifier trained **exclusively on the 12-dimensional genetic feature vector**. It predicts patient-level seizure risk from DNA-level markers.
+The Genetic Branch is a gradient-boosted classifier trained **exclusively on the 16-dimensional genetic feature vector**. It predicts patient-level seizure risk from DNA-level markers.
 
 | Parameter | Value | Rationale |
 |-----------|-------|-----------|
-| Input | 12-dim genetic vector per patient | 9 mutation flags + 2 pLI scores + 1 PRS |
-| Task | Binary classification | `has_seizure` (0/1) per patient |
-| n_estimators | 300 (max) | — |
-| max_depth | 4 | Prevents overfitting on genetic data |
-| learning_rate | 0.05 | Conservative updates |
-| subsample | 0.8 | Row sampling for regularisation |
-| colsample_bytree | 0.8 | Feature sampling for regularisation |
-| scale_pos_weight | 3 | Moderate positive weighting |
-| eval_metric | AUC | Optimises ranking/separation |
-| Early stopping | 20 rounds | Stops if validation AUC plateaus |
-| GPU | CUDA (`device='cuda'`) | Histogram-based GPU acceleration |
-| Output | P_genetic ∈ [0,1] | Patient-level seizure risk |
+| Input | 16-dim genetic vector per patient | 9 weighted mutations + 2 pLI + 1 PRS + 4 engineered |
+| Training data | 1,200 synthetic + 8 real patients | Generated by `scripts/generate_synthetic_genetic_patients.py` |
+| Task | Binary classification | `has_seizure` label per patient |
+| Primary metric | **AUC-PR** | More informative than ROC-AUC for imbalanced data |
+| GPU | `device='cuda'` | CUDA-accelerated histogram method |
+| n_estimators | 200 (with early stop) | Low-dim data converges faster |
+| max_depth | **3** | 16 features don't need deep trees |
+| min_child_weight | **4** | Forces each leaf to have 4+ samples |
+| subsample | 0.75 | Row subsampling reduces overfitting |
+| colsample_bytree | 0.80 | Feature subsampling per tree |
+| reg_alpha (L1) | 0.5 | Feature selection on sparse genetic data |
+| reg_lambda (L2) | 2.0 | Smooths out CTGAN noise |
+| scale_pos_weight | **computed fresh** | Recomputed from genetic label distribution |
+| Sample weights | Real=3×, Synthetic=1× | Trust real patients more than simulated |
+| Output | `models/xgboost_genetic/` | Model, metrics, plots, CV results, LOPO results, SHAP |
 
-**Training data:**
-- 1,000 synthetic patients generated from population carrier frequencies (ClinVar), gnomAD pLI scores, and GWAS effect sizes
-- Plus 8 real CHB-MIT patients with simulated genetic profiles
-- Script: `scripts/generate_synthetic_genetic_patients.py`
+**Training strategy:**
+1. **Stratified 5-fold cross-validation** on the full cohort
+2. **Leave-One-Patient-Out (LOPO)** on the 8 real patients as final validation
+3. **Sample weighting:** real rows get 3× weight, synthetic rows get 1×
+4. **SHAP analysis** to verify biological interpretability (SCN1A, KCNQ2 expected top features)
 
 **Training script:** `cloud_training/03_train_xgboost_genetic.py`
 
 **Outputs:**
 - `models/xgboost_genetic/xgboost_genetic_model.pkl`
-- `models/xgboost_genetic/xgboost_genetic_metrics.json`
+- `models/xgboost_genetic/xgboost_genetic_metrics.json` (test-set metrics)
+- `models/xgboost_genetic/cv_results.json` (5-fold CV scores)
+- `models/xgboost_genetic/lopo_results.json` (LOPO per-patient scores)
+- `models/xgboost_genetic/training_log.json`
 - `models/xgboost_genetic/plots/feature_importance.png`
 - `models/xgboost_genetic/plots/roc_curve.png`
 - `models/xgboost_genetic/plots/pr_curve.png`
 - `models/xgboost_genetic/plots/confusion_matrix.png`
-- `models/xgboost_genetic/training_log.json`
+- `models/xgboost_genetic/plots/shap_summary.png`
 
-**XGBoost 2.0+ API compatibility:**
-XGBoost ≥ 2.0 removed `early_stopping_rounds` from `.fit()`. The training script uses a `try/except` fallback:
-```python
-try:
-    model.fit(..., early_stopping_rounds=20, ...)
-except TypeError:
-    callbacks = [xgb.callback.EarlyStopping(rounds=20, save_best=True)]
-    model.fit(..., callbacks=callbacks, ...)
-```
+**Expected SHAP ranking (if model learned correctly):**
+1. Mutation burden score or tier-1 flag
+2. SCN1A weighted flag
+3. PRS
+4. KCNQ2 or SCN2A flag
+5. pLI scores
+6. Ion channel burden
+
+If PCDH19 or GABRA1 rank near the top, this indicates spurious correlation or label-assignment issues.
 
 ---
 
