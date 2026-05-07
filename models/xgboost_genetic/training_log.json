@@ -1,0 +1,36 @@
+{
+  "timestamp": "2026-05-07T20:39:17.364134",
+  "data_path": "/Users/rajat.gondkar/Desktop/IDP Main/eeg-genetic-fusion/data/processed/genetic_vectors/genetic_training_cohort.csv",
+  "output_dir": "/Users/rajat.gondkar/Desktop/IDP Main/eeg-genetic-fusion/models/xgboost_genetic",
+  "n_patients": 5000,
+  "n_features": 16,
+  "target": "has_seizure",
+  "scale_pos_weight": 0.43843498273878023,
+  "device": "cpu",
+  "duration_sec": 3.06,
+  "metrics": {
+    "auc": 0.7385612149963539,
+    "aucpr": 0.8687575574042883,
+    "accuracy": 0.6306666666666667,
+    "precision": 0.8674698795180723,
+    "recall": 0.5527831094049904,
+    "f1": 0.675263774912075,
+    "specificity": 0.8078602620087336,
+    "threshold": 0.5,
+    "n_test": 750,
+    "n_test_seizure": 521,
+    "tn": 185,
+    "fp": 44,
+    "fn": 233,
+    "tp": 288
+  },
+  "cv_average": {
+    "auc": 0.7407006944383502,
+    "aucpr": 0.8744817078584894,
+    "accuracy": 0.6317999999999999,
+    "precision": 0.8816384716116392,
+    "recall": 0.5434441412387333,
+    "f1": 0.6720032601552257,
+    "specificity": 0.8333433994823125
+  }
+}

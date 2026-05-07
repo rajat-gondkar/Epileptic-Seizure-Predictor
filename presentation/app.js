@@ -318,6 +318,9 @@ function initSegments() {
 // ============================================================
 function initGeneticSection() {
     const container = document.getElementById('mutation-heatmap');
+    const prsContainer = document.getElementById('prs-chart');
+    if (!container || !prsContainer) return;
+
     const genes = geneticData.gene_names;
     const patients = geneticData.data;
 
@@ -337,7 +340,6 @@ function initGeneticSection() {
     container.innerHTML = html;
 
     // PRS chart
-    const prsContainer = document.getElementById('prs-chart');
     let prsHtml = '';
     patients.forEach(pat => {
         const prs = pat.polygenic_risk_score || 0;
