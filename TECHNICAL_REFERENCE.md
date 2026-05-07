@@ -341,21 +341,40 @@ Since CHB-MIT provides no real genetic data, profiles are simulated using:
 | Live monitor | Terminal table: Epoch / Train Loss / Val Loss / Val AUC / Sens / Spec / LR / Time / ETA / Status | Updated every epoch |
 | First-batch diagnostics | Prints pred mean/std/min/max, grad norm, per-layer gradient norms | Debug only; confirms model is not stuck |
 
-**XGBoost branch**:
+### 6.2 Genetic Branch — XGBoost on 12-Dim Genetic Features
 
-| Parameter | Value |
-|-----------|-------|
-| Input | 221-dim EEG feature vector per epoch (XGBoost is currently trained on EEG features only; genetic fusion happens in the fusion layer) |
-| n_estimators | 300 |
-| max_depth | 4 |
-| learning_rate | 0.05 |
-| subsample | 0.8 |
-| colsample_bytree | 0.8 |
-| **scale_pos_weight** | **9** | Matches actual ~11:1 class ratio |
-| eval_metric | AUC |
-| early_stopping_rounds | 20 |
-| GPU | CUDA (`device='cuda'`) via histogram method |
-| Output | P_genetic ∈ [0,1] |
+The Genetic Branch is a gradient-boosted classifier trained **exclusively on the 12-dimensional genetic feature vector**. It predicts patient-level seizure risk from DNA-level markers.
+
+| Parameter | Value | Rationale |
+|-----------|-------|-----------|
+| Input | 12-dim genetic vector per patient | 9 mutation flags + 2 pLI scores + 1 PRS |
+| Task | Binary classification | `has_seizure` (0/1) per patient |
+| n_estimators | 300 (max) | — |
+| max_depth | 4 | Prevents overfitting on genetic data |
+| learning_rate | 0.05 | Conservative updates |
+| subsample | 0.8 | Row sampling for regularisation |
+| colsample_bytree | 0.8 | Feature sampling for regularisation |
+| scale_pos_weight | 3 | Moderate positive weighting |
+| eval_metric | AUC | Optimises ranking/separation |
+| Early stopping | 20 rounds | Stops if validation AUC plateaus |
+| GPU | CUDA (`device='cuda'`) | Histogram-based GPU acceleration |
+| Output | P_genetic ∈ [0,1] | Patient-level seizure risk |
+
+**Training data:**
+- 1,000 synthetic patients generated from population carrier frequencies (ClinVar), gnomAD pLI scores, and GWAS effect sizes
+- Plus 8 real CHB-MIT patients with simulated genetic profiles
+- Script: `scripts/generate_synthetic_genetic_patients.py`
+
+**Training script:** `cloud_training/03_train_xgboost_genetic.py`
+
+**Outputs:**
+- `models/xgboost_genetic/xgboost_genetic_model.pkl`
+- `models/xgboost_genetic/xgboost_genetic_metrics.json`
+- `models/xgboost_genetic/plots/feature_importance.png`
+- `models/xgboost_genetic/plots/roc_curve.png`
+- `models/xgboost_genetic/plots/pr_curve.png`
+- `models/xgboost_genetic/plots/confusion_matrix.png`
+- `models/xgboost_genetic/training_log.json`
 
 **XGBoost 2.0+ API compatibility:**
 XGBoost ≥ 2.0 removed `early_stopping_rounds` from `.fit()`. The training script uses a `try/except` fallback:
@@ -363,7 +382,6 @@ XGBoost ≥ 2.0 removed `early_stopping_rounds` from `.fit()`. The training scri
 try:
     model.fit(..., early_stopping_rounds=20, ...)
 except TypeError:
-    # XGBoost 2.0+ moved early stopping to callbacks
     callbacks = [xgb.callback.EarlyStopping(rounds=20, save_best=True)]
     model.fit(..., callbacks=callbacks, ...)
 ```
@@ -380,9 +398,11 @@ except TypeError:
 
 | Script | Purpose |
 |--------|---------|
-| `run_all.sh` | Master shell script; auto-detects `python3`/`python`, installs deps, runs steps 01 and 02, pipes all output to `models/training_log.txt` via `tee` |
+| `run_all.sh` | Master shell script; auto-detects `python3`/`python`, installs deps, runs pipeline steps |
 | `01_download_and_preprocess.py` | Thin wrapper forwarding to `scripts/selective_download_and_preprocess.py` |
-| `02_train_models.py` | Trains BiLSTM and XGBoost with live terminal status monitor |
+| `02_train_models.py` | Trains BiLSTM (EEG branch) with live terminal status monitor |
+| `03_train_xgboost_genetic.py` | Trains XGBoost (Genetic branch) on 12-dim genetic vectors |
+| `scripts/generate_synthetic_genetic_patients.py` | Generates synthetic genetic patient cohort (1,000 patients) for XGBoost training |
 | `requirements.txt` | All pip dependencies pinned for reproducibility |
 
 ### 12.2 Shell Script Features
@@ -395,9 +415,9 @@ Ubuntu/Debian systems often lack a `python` command. `run_all.sh` now probes for
 |------|-----------|
 | (none) | Full pipeline: deps → download → preprocess → train |
 | `--skip-download` | Skips EDF downloads but still runs preprocessing if `.npy` files are missing |
-| `--train-only` | Skips download AND preprocessing; jumps straight to Step 2 |
+| `--train-only` | Skips download AND preprocessing; jumps straight to training |
 | `--quick-test` | 3 LSTM epochs, 2000 epochs/patient cap — smoke test |
-| `--xgboost` | Skips LSTM training; runs only XGBoost (use with `--train-only`) |
+| `--xgboost-only` | Runs only the Genetic XGBoost branch |
 
 **Pipeline progress tracker:**
 The shell script prints `[1/3]`, `[2/3]`, `[3/3]` step headers with elapsed times and a final total duration.
@@ -434,17 +454,19 @@ All stdout/stderr from the training script is tee'd to `models/training_log.txt`
 | Live monitor | Terminal table: Epoch / Train Loss / Val Loss / Val AUC / Sens / Spec / LR / Time / ETA / Status | Updated every epoch |
 | First-batch diagnostics | Prints pred mean/std/min/max, grad norm, per-layer gradient norms | Debug only; confirms model is not stuck |
 
-**XGBoost branch**:
+**Genetic XGBoost branch** (`03_train_xgboost_genetic.py`):
 
-| Parameter | Value |
-|-----------|-------|
-| Input | 221-dim feature vector per epoch |
-| GPU | `device='cuda'` (CUDA-accelerated histogram method) |
-| n_estimators | 300 max |
-| Early stopping | 20 rounds (XGBoost 2.0+ uses `xgb.callback.EarlyStopping`) |
-| eval_metric | AUC |
-| scale_pos_weight | 9 |
-| Output | `models/xgboost_model.pkl` |
+| Parameter | Value | Notes |
+|-----------|-------|-------|
+| Input | 12-dim genetic feature vector | 9 mutations + 2 pLI + 1 PRS per patient |
+| Training data | 1,000 synthetic + 8 real patients | Generated by `scripts/generate_synthetic_genetic_patients.py` |
+| Task | Binary classification | `has_seizure` label per patient |
+| GPU | `device='cuda'` | CUDA-accelerated histogram method |
+| n_estimators | 300 max | — |
+| Early stopping | 20 rounds | XGBoost 2.0+ uses `xgb.callback.EarlyStopping` |
+| eval_metric | AUC | — |
+| scale_pos_weight | 3 | Moderate weighting for class imbalance |
+| Output | `models/xgboost_genetic/` | Model, metrics, plots, training log |
 
 ### 12.4 Download Strategy
 
@@ -456,24 +478,24 @@ Each run creates a **timestamped subdirectory** under `models/` (e.g., `models/2
 
 ```
 models/
-└── 20260115_143022/
-    ├── lstm_best.pt              # Best LSTM checkpoint (by validation AUC)
-    ├── lstm_latest.pt            # Last epoch checkpoint
-    ├── lstm_history.json         # Per-epoch loss, AUC, sens, spec, LR, time
-    ├── xgboost_model.pkl         # Trained XGBoost model
-    ├── xgboost_metrics.json      # Validation AUC/accuracy/precision/recall/F1
-    ├── test_results.json         # Test-set evaluation (LSTM + XGBoost)
-    ├── test_labels.npy           # True test labels (for plot generation)
-    ├── lstm_test_preds.npy       # LSTM predictions on held-out test patients
-    ├── xgb_test_preds.npy        # XGBoost predictions on held-out test patients
-    ├── loss_curve.png            # Train/val loss over epochs
-    ├── val_auc_curve.png         # Validation AUC over epochs
-    ├── sens_spec_curve.png       # Validation sensitivity/specificity over epochs
-    ├── lr_schedule.png           # Learning rate schedule
-    ├── roc_curve.png             # ROC curves (test set)
-    ├── pr_curve.png              # Precision-Recall curves (test set)
-    ├── confusion_matrix_lstm.png # LSTM confusion matrix (test set)
-    └── confusion_matrix_xgboost.png  # XGBoost confusion matrix (test set)
+├── 20260115_143022/              # LSTM outputs (timestamped)
+│   ├── lstm_best.pt
+│   ├── lstm_latest.pt
+│   ├── lstm_history.json
+│   ├── loss_curve.png
+│   ├── val_auc_curve.png
+│   ├── sens_spec_curve.png
+│   ├── lr_schedule.png
+│   └── ...
+└── xgboost_genetic/              # Genetic XGBoost outputs
+    ├── xgboost_genetic_model.pkl
+    ├── xgboost_genetic_metrics.json
+    ├── training_log.json
+    └── plots/
+        ├── feature_importance.png
+        ├── roc_curve.png
+        ├── pr_curve.png
+        └── confusion_matrix.png
 ```
 
 These outputs are the inputs for the Attention Fusion Layer.
