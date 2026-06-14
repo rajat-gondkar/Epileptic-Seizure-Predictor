@@ -40,9 +40,9 @@ echo ""
 echo -e "${YELLOW}Step 0: Checking prerequisites...${NC}"
 
 # Check EEG model
-EEG_MODEL=$(ls seizure_prediction/SavedModels/EEGLSTM_*.net 2>/dev/null | head -1)
-if [ -z "$EEG_MODEL" ]; then
-    echo -e "${RED}ERROR: EEG model not found in seizure_prediction/SavedModels/${NC}"
+EEG_MODEL="seizure_prediction/SavedModels/EEGLSTM_CHB-MIT_all_patients_train_Epoch-15_TLoss-0.0501_VLoss-0.7880_20260605-152850.net"
+if [ ! -f "$EEG_MODEL" ]; then
+    echo -e "${RED}ERROR: EEG model not found at $EEG_MODEL${NC}"
     echo "Please ensure the trained EEG model exists."
     exit 1
 fi

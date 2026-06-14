@@ -324,11 +324,11 @@ chmod +x scripts/run_fusion_training.sh
 
 # Ensure both models exist
 ls models/xgboost_genetic/xgboost_genetic_model.pkl
-ls seizure_prediction/SavedModels/EEGLSTM_*.net
+ls seizure_prediction/SavedModels/EEGLSTM_CHB-MIT_all_patients_train_Epoch-15_TLoss-0.0501_VLoss-0.7880_20260605-152850.net
 
 # Train fusion layer (extracts embeddings + trains attention gate)
 python scripts/train_fusion.py \
-  --eeg-model seizure_prediction/SavedModels/EEGLSTM_*.net \
+  --eeg-model seizure_prediction/SavedModels/EEGLSTM_CHB-MIT_all_patients_train_Epoch-15_TLoss-0.0501_VLoss-0.7880_20260605-152850.net \
   --genetic-features data/processed/genetic_vectors/genetic_training_cohort.csv \
   --xgb-model models/xgboost_genetic/xgboost_genetic_model.pkl \
   --epochs 30 --lr 0.001
