@@ -370,7 +370,6 @@ function initCTGANPage() {
     initSeizureBars();
     initGeneticComparison();
     initValidationGrid();
-    initOptionAProfiles();
     initOptionCRawTable();
 }
 
