@@ -212,7 +212,7 @@ class EEGBranchWrapper:
         from libModelLSTM import clsLSTM
         
         # Load checkpoint
-        checkpoint = torch.load(self.model_path, map_location=self.device)
+        checkpoint = torch.load(self.model_path, map_location=self.device, weights_only=False)
         
         # Extract model parameters
         intFeaturesDim = checkpoint['intFeaturesDim']
@@ -228,7 +228,7 @@ class EEGBranchWrapper:
         )
         
         # Load weights
-        self.model.load_state_dict(checkpoint['dctStateDict'])
+        self.model.load_state_dict(checkpoint['dctStateDict'], weights_only=False)
         self.model.to(self.device)
         self.model.eval()
         
@@ -545,7 +545,7 @@ class FusionInference:
         
         # Load fusion model
         self.fusion_model = AttentionGateFusion()
-        self.fusion_model.load_state_dict(torch.load(fusion_model_path, map_location=device))
+        self.fusion_model.load_state_dict(torch.load(fusion_model_path, map_location=device, weights_only=False))
         self.fusion_model.to(device)
         self.fusion_model.eval()
         

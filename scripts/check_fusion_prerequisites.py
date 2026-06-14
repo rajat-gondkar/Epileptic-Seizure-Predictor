@@ -59,7 +59,7 @@ def check_eeg_model(model_path):
         from libModelLSTM import clsLSTM
         
         # Load checkpoint
-        checkpoint = torch.load(model_path, map_location='cpu')
+        checkpoint = torch.load(model_path, map_location='cpu', weights_only=False)
         
         # Extract parameters
         intFeaturesDim = checkpoint['intFeaturesDim']
@@ -75,7 +75,7 @@ def check_eeg_model(model_path):
         # Create model
         model = clsLSTM(intFeaturesDim, intHiddenDim, intNumLayers,
                        intOutputSize, fltDropProb)
-        model.load_state_dict(checkpoint['dctStateDict'])
+        model.load_state_dict(checkpoint['dctStateDict'], weights_only=False)
         model.eval()
         
         param_count = sum(p.numel() for p in model.parameters())

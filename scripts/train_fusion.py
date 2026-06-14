@@ -125,7 +125,7 @@ def extract_eeg_embeddings_from_model(
     from libModelLSTM import clsLSTM
     
     # Load model
-    checkpoint = torch.load(eeg_model_path, map_location=device)
+    checkpoint = torch.load(eeg_model_path, map_location=device, weights_only=False)
     
     model = clsLSTM(
         checkpoint['intFeaturesDim'],
@@ -134,7 +134,7 @@ def extract_eeg_embeddings_from_model(
         checkpoint['intOutputSize'],
         checkpoint['fltDropProb'],
     )
-    model.load_state_dict(checkpoint['dctStateDict'])
+    model.load_state_dict(checkpoint['dctStateDict'], weights_only=False)
     model.to(device)
     model.eval()
     
@@ -473,7 +473,7 @@ def main():
     print("\n--- Evaluating on Test Set ---")
     
     # Load best model
-    model.load_state_dict(torch.load(save_path))
+    model.load_state_dict(torch.load(save_path, weights_only=False))
     model.eval()
     
     all_preds = []

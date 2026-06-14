@@ -47,7 +47,7 @@ def load_fusion_model(model_path: str, eeg_dim: int = 64) -> AttentionGateFusion
         hidden_dim=128,
         dropout=0.3,
     )
-    model.load_state_dict(torch.load(model_path, map_location='cpu'))
+    model.load_state_dict(torch.load(model_path, map_location='cpu', weights_only=False))
     model.eval()
     return model
 
