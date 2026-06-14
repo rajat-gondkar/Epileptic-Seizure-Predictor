@@ -1,0 +1,296 @@
+{
+  "n_real": 279,
+  "n_synthetic": 5000,
+  "ks_tests": {
+    "has_seizure": {
+      "KS_stat": 0.10937275985663082,
+      "p_value": 0.003290311989774324,
+      "pass": false,
+      "real_mean": 0.17562724014336917,
+      "synth_mean": 0.285
+    },
+    "seizure_ratio": {
+      "KS_stat": 0.3845727598566308,
+      "p_value": 1.305633183845097e-35,
+      "pass": false,
+      "real_mean": 0.0034896455595380326,
+      "synth_mean": 0.004434240131343128
+    },
+    "preictal_ratio": {
+      "KS_stat": 0.1705727598566308,
+      "p_value": 3.424349280941167e-07,
+      "pass": false,
+      "real_mean": 0.08781362007168458,
+      "synth_mean": 0.15352
+    },
+    "global_mean": {
+      "KS_stat": 0.2490888888888889,
+      "p_value": 6.3455625873094984e-15,
+      "pass": false,
+      "real_mean": 0.2209479063774355,
+      "synth_mean": 0.21160845530219963
+    },
+    "global_std": {
+      "KS_stat": 0.2691727598566308,
+      "p_value": 2.175228516875877e-17,
+      "pass": false,
+      "real_mean": 48.133362984815925,
+      "synth_mean": 61.56942284668358
+    },
+    "global_max": {
+      "KS_stat": 0.2242731182795699,
+      "p_value": 3.724190047339192e-12,
+      "pass": false,
+      "real_mean": 1451.9729891772902,
+      "synth_mean": 1247.8123653847006
+    },
+    "global_min": {
+      "KS_stat": 0.1857304659498208,
+      "p_value": 1.8803876142391662e-08,
+      "pass": false,
+      "real_mean": -1453.334208603026,
+      "synth_mean": -1745.2657325590126
+    },
+    "global_range": {
+      "KS_stat": 0.13840501792114696,
+      "p_value": 7.0407726998938e-05,
+      "pass": false,
+      "real_mean": 2905.3071977803156,
+      "synth_mean": 3037.736737730375
+    },
+    "global_rms": {
+      "KS_stat": 0.24257275985663082,
+      "p_value": 3.6215132600062315e-14,
+      "pass": false,
+      "real_mean": 48.134219566459514,
+      "synth_mean": 56.25547339987201
+    },
+    "mean_amplitude": {
+      "KS_stat": 0.26568888888888886,
+      "p_value": 6.02092705893458e-17,
+      "pass": false,
+      "real_mean": 0.2209479063774355,
+      "synth_mean": 0.2201929015111762
+    },
+    "std_amplitude": {
+      "KS_stat": 0.16266308243727598,
+      "p_value": 1.4086694637158693e-06,
+      "pass": false,
+      "real_mean": 43.14684070039922,
+      "synth_mean": 46.30895165157117
+    },
+    "mean_hjorth_activity": {
+      "KS_stat": 0.250415770609319,
+      "p_value": 4.425128674764765e-15,
+      "pass": false,
+      "real_mean": 3182.7517657587305,
+      "synth_mean": 2664.9851999219377
+    },
+    "mean_hjorth_mobility": {
+      "KS_stat": 0.15046093189964158,
+      "p_value": 1.0920403379748512e-05,
+      "pass": false,
+      "real_mean": 0.3956731047237078,
+      "synth_mean": 0.34525244661568877
+    },
+    "mean_hjorth_complexity": {
+      "KS_stat": 0.23471397849462367,
+      "p_value": 2.7774188371541455e-13,
+      "pass": false,
+      "real_mean": 3.845792211264949,
+      "synth_mean": 4.65044796062682
+    },
+    "mean_delta_power": {
+      "KS_stat": 0.13035698924731182,
+      "p_value": 0.0002238538684635941,
+      "pass": false,
+      "real_mean": 0.40166978842718276,
+      "synth_mean": 0.3955221880719496
+    },
+    "mean_theta_power": {
+      "KS_stat": 0.2969362007168459,
+      "p_value": 3.926104337281236e-21,
+      "pass": false,
+      "real_mean": 0.12128743334621035,
+      "synth_mean": 0.10111206513685689
+    },
+    "mean_alpha_power": {
+      "KS_stat": 0.12538924731182796,
+      "p_value": 0.00044149453302961205,
+      "pass": false,
+      "real_mean": 0.05213738122794166,
+      "synth_mean": 0.05237603310029582
+    },
+    "mean_beta_power": {
+      "KS_stat": 0.13910465949820788,
+      "p_value": 6.345824253415728e-05,
+      "pass": false,
+      "real_mean": 0.09218842978966087,
+      "synth_mean": 0.09867134480479481
+    },
+    "mean_gamma_power": {
+      "KS_stat": 0.135215770609319,
+      "p_value": 0.00011229239728334496,
+      "pass": false,
+      "real_mean": 0.08543936352617283,
+      "synth_mean": 0.08142721367456077
+    },
+    "mean_spectral_entropy": {
+      "KS_stat": 0.16693620071684587,
+      "p_value": 6.616975239421676e-07,
+      "pass": false,
+      "real_mean": 3.8292992550783755,
+      "synth_mean": 4.123530581578395
+    },
+    "mean_channel_corr": {
+      "KS_stat": 0.11893459116775212,
+      "p_value": 0.004248495459499413,
+      "pass": false,
+      "real_mean": 0.08923304021146805,
+      "synth_mean": 0.09743309737126554
+    },
+    "std_channel_corr": {
+      "KS_stat": 0.12340216322517207,
+      "p_value": 0.0026967399895268655,
+      "pass": false,
+      "real_mean": 0.26026022958176775,
+      "synth_mean": 0.24961371443835975
+    },
+    "weighted_mutation_0": {
+      "KS_stat": 0.05883584229390681,
+      "p_value": 0.30694539066988885,
+      "pass": true,
+      "real_mean": 0.18996415770609318,
+      "synth_mean": 0.2488
+    },
+    "weighted_mutation_1": {
+      "KS_stat": 0.0821584229390681,
+      "p_value": 0.053180521889598015,
+      "pass": true,
+      "real_mean": 0.08530465949820787,
+      "synth_mean": 0.01547
+    },
+    "weighted_mutation_2": {
+      "KS_stat": 0.030963440860215054,
+      "p_value": 0.9545291007814781,
+      "pass": true,
+      "real_mean": 0.0510752688172043,
+      "synth_mean": 0.02166
+    },
+    "weighted_mutation_3": {
+      "KS_stat": 0.016484587813620073,
+      "p_value": 0.9999989589621724,
+      "pass": true,
+      "real_mean": 0.06451612903225806,
+      "synth_mean": 0.04968000000000001
+    },
+    "weighted_mutation_4": {
+      "KS_stat": 0.028295340501792113,
+      "p_value": 0.9798785497380912,
+      "pass": true,
+      "real_mean": 0.09175627240143372,
+      "synth_mean": 0.06912
+    },
+    "weighted_mutation_5": {
+      "KS_stat": 0.0425584229390681,
+      "p_value": 0.7074156671623201,
+      "pass": true,
+      "real_mean": 0.06523297491039427,
+      "synth_mean": 0.037570000000000006
+    },
+    "weighted_mutation_6": {
+      "KS_stat": 0.0,
+      "p_value": 1.0,
+      "pass": true,
+      "real_mean": 0.0,
+      "synth_mean": 0.0
+    },
+    "weighted_mutation_7": {
+      "KS_stat": 0.0,
+      "p_value": 1.0,
+      "pass": true,
+      "real_mean": 0.0,
+      "synth_mean": 0.0
+    },
+    "weighted_mutation_8": {
+      "KS_stat": 0.002236559139784946,
+      "p_value": 1.0,
+      "pass": true,
+      "real_mean": 0.026881720430107527,
+      "synth_mean": 0.028
+    },
+    "SCN1A_pLI": {
+      "KS_stat": 0.0,
+      "p_value": 1.0,
+      "pass": true,
+      "real_mean": 1.0,
+      "synth_mean": 1.0
+    },
+    "SCN8A_pLI": {
+      "KS_stat": 0.0,
+      "p_value": 1.0,
+      "pass": true,
+      "real_mean": 1.0,
+      "synth_mean": 1.0
+    },
+    "PRS": {
+      "KS_stat": 0.13284444444444443,
+      "p_value": 0.00015780568384408605,
+      "pass": false,
+      "real_mean": 1.715662452580582,
+      "synth_mean": 1.7197996599283618
+    },
+    "mutation_burden": {
+      "KS_stat": 0.33686021505376346,
+      "p_value": 3.240827007684765e-27,
+      "pass": false,
+      "real_mean": 0.574731182795699,
+      "synth_mean": 0.784374
+    },
+    "ion_channel_burden": {
+      "KS_stat": 0.3169820788530466,
+      "p_value": 4.411472775274228e-24,
+      "pass": false,
+      "real_mean": 0.48261648745519714,
+      "synth_mean": 0.497292
+    },
+    "tier1_flag": {
+      "KS_stat": 0.08487240143369176,
+      "p_value": 0.04174773629159645,
+      "pass": false,
+      "real_mean": 0.24372759856630824,
+      "synth_mean": 0.3286
+    },
+    "SCN1A_severity_proxy": {
+      "KS_stat": 0.01063584229390681,
+      "p_value": 1.0,
+      "pass": true,
+      "real_mean": 0.18996415770609318,
+      "synth_mean": 0.2006
+    }
+  },
+  "ks_pass_rate": 0.3157894736842105,
+  "correlation_metrics": {
+    "diff": 0.23466156532451027,
+    "corr": 0.45349112742912695
+  },
+  "sanity_checks": {
+    "weighted_mutation_0_non_negative": true,
+    "weighted_mutation_1_non_negative": true,
+    "weighted_mutation_2_non_negative": true,
+    "weighted_mutation_3_non_negative": true,
+    "weighted_mutation_4_non_negative": true,
+    "weighted_mutation_5_non_negative": true,
+    "weighted_mutation_6_non_negative": true,
+    "weighted_mutation_7_non_negative": true,
+    "weighted_mutation_8_non_negative": true,
+    "mutation_burden_non_negative": true,
+    "ion_channel_burden_non_negative": true,
+    "seizure_ratio_valid": true,
+    "preictal_ratio_valid": true,
+    "SCN1A_pLI_constant": true,
+    "SCN8A_pLI_constant": true,
+    "has_seizure_binary": true,
+    "tier1_flag_binary": true
+  }
+}

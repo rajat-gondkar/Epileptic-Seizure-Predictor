@@ -228,7 +228,7 @@ class EEGBranchWrapper:
         )
         
         # Load weights
-        self.model.load_state_dict(checkpoint['dctStateDict'], weights_only=False)
+        self.model.load_state_dict(checkpoint['dctStateDict'])
         self.model.to(self.device)
         self.model.eval()
         

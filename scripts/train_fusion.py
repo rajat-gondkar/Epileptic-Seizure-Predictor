@@ -134,7 +134,7 @@ def extract_eeg_embeddings_from_model(
         checkpoint['intOutputSize'],
         checkpoint['fltDropProb'],
     )
-    model.load_state_dict(checkpoint['dctStateDict'], weights_only=False)
+    model.load_state_dict(checkpoint['dctStateDict'])
     model.to(device)
     model.eval()
     
