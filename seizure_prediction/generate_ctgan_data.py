@@ -36,6 +36,10 @@ import yaml
 from scipy import stats, signal
 from scipy.signal import welch
 
+# NumPy 2.0+ compatibility: np.trapz renamed to np.trapezoid
+if not hasattr(np, 'trapz'):
+    np.trapz = np.trapezoid
+
 warnings.filterwarnings('ignore')
 
 # -- Project root --
