@@ -453,8 +453,8 @@ def main():
                 sys.path.insert(0, str(PROJECT_ROOT / 'seizure_prediction'))
                 from libCHBMITDataset import CHBMITDataset
                 
-                train_dataset = CHBMITDataset(str(csv_train), segment_len=10, preprocess=True)
-                test_dataset = CHBMITDataset(str(csv_test), segment_len=10, preprocess=True)
+                train_dataset = CHBMITDataset(str(csv_train), argInfo=True)
+                test_dataset = CHBMITDataset(str(csv_test), argInfo=True)
                 
                 print(f"    Train windows: {len(train_dataset)}")
                 print(f"    Test windows: {len(test_dataset)}")
