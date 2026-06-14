@@ -14,3 +14,5 @@ SavedAnno/
 .vscode/
 __pycache__/
 *.pyc
+
+result/

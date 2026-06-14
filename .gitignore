@@ -53,7 +53,7 @@ models/*.json
 models/*.ubj
 seizure_prediction/Logs
 
-
+result/
 # ── Reports / outputs ────────────────────────────
 reports/*.pdf
 reports/*.png
