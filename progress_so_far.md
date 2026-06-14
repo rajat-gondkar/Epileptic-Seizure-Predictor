@@ -153,15 +153,22 @@ Created `seizure_prediction/generate_ctgan_data.py` — completely rewritten CTG
    - **Label noise**: σ=0.15 (log-odds space) — realistic biological variation
    - **Baseline seizure rate**: 1% (general population prevalence)
 
+#### v5.1: Bug Fixes (June 2026)
+- Fixed seizure rate from 29% → ~1-3% by using log-odds space for probability calculation
+- Added missing `mutation_burden` feature to generated CSV
+- Mutation effects now properly scaled in log-odds space
+
 **Files Modified/Created**:
 
-1. **`scripts/generate_synthetic_genetic_patients.py`** (v5)
+1. **`scripts/generate_synthetic_genetic_patients.py`** (v5.1)
    - Loads real ClinVar variant counts
    - Loads real gnomAD pLI, o/e LoF scores
    - Loads real GWAS risk allele frequencies
    - Derives carrier frequencies computationally
    - Derives risk weights from gene burden × constraint
    - Outputs debug info (seizure_prob, n_mutations)
+   - Fixed: seizure probability calculated in log-odds space
+   - Fixed: includes mutation_burden feature
 
 2. **`src/data_pipeline/genetic_feature_engineering.py`** (v2)
    - 22-dim feature vectors with extended pLI scores

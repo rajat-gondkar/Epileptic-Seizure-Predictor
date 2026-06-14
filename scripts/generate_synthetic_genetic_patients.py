@@ -263,41 +263,47 @@ def generate_patient(rng, carrier_freqs, risk_weights, seizure_risk,
     tier1_flag = int(any(binary_flags[g] == 1 for g in ['SCN1A', 'KCNQ2', 'SCN2A']))
     prs_tier1_interaction = float(prs * tier1_flag)
 
+    # Mutation burden (sum of weighted mutations)
+    mutation_burden = sum(risk_weights[g] * binary_flags[g] for g in TARGET_GENES)
+
     # 6. Compute seizure probability from REAL genetics
     # Each mutation contributes its gene-specific seizure risk
-    mutation_seizure_prob = 0.0
+    # But we use log-odds scale to keep probability realistic
+    mutation_log_odds = 0.0
     n_mutations = 0
     for gene in TARGET_GENES:
         if binary_flags[gene] == 1:
-            mutation_seizure_prob += seizure_risk.get(gene, 0.5)
+            # Convert penetrance to log-odds contribution
+            p = seizure_risk.get(gene, 0.5)
+            mutation_log_odds += np.log(p / (1 - p + 1e-8))
             n_mutations += 1
 
-    # PRS contribution (continuous risk)
-    prs_effect = prs * 0.15  # Moderate effect
+    # PRS contribution (small continuous effect in log-odds)
+    prs_effect = prs * 0.10  # Small effect
 
-    # Gene-gene interactions (epistasis)
+    # Gene-gene interactions (epistasis) in log-odds
     interaction_effect = 0.0
     if sodium_interaction > 0:
-        interaction_effect += 0.25  # Sodium channel triple mutation is severe
+        interaction_effect += 0.5  # Sodium channel triple mutation is severe
     if potassium_interaction > 0:
-        interaction_effect += 0.15
+        interaction_effect += 0.3
     if receptor_interaction > 0:
-        interaction_effect += 0.10
+        interaction_effect += 0.2
 
     # Base seizure probability (general population: ~1%)
-    base_prob = 0.01
+    base_log_odds = np.log(0.01 / 0.99)  # ≈ -4.6
 
-    # Combine all effects
-    total_risk = (
-        base_prob
-        + mutation_seizure_prob * 0.3  # Scale down to avoid >1
+    # Combine all effects in log-odds space
+    total_log_odds = (
+        base_log_odds
+        + mutation_log_odds * 0.5  # Scale mutation effect
         + prs_effect
         + interaction_effect
     )
 
-    # Add biological noise (realistic: σ=0.15 for log-odds)
-    noise = rng.normal(0, 0.15)
-    logit = np.log(total_risk / (1 - total_risk) + 1e-8) + noise
+    # Add biological noise (realistic: σ=0.3 for log-odds)
+    noise = rng.normal(0, 0.3)
+    logit = total_log_odds + noise
     seizure_prob = 1.0 / (1.0 + np.exp(-logit))
     seizure_prob = np.clip(seizure_prob, 0.005, 0.99)
 
@@ -319,6 +325,7 @@ def generate_patient(rng, carrier_freqs, risk_weights, seizure_risk,
         'potassium_channel_interaction': potassium_interaction,
         'receptor_interaction': receptor_interaction,
         'prs_tier1_interaction': prs_tier1_interaction,
+        'mutation_burden': float(mutation_burden),
         'has_seizure': has_seizure,
         'preictal_ratio': preictal_ratio,
         # Debug info
