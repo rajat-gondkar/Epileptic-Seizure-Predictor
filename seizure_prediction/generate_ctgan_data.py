@@ -201,8 +201,8 @@ def compute_eeg_features(eeg_data, sampling_rate=256):
 
 def compute_summary_statistics(eeg_data, sampling_rate=256):
     """
-    Compute aggregate EEG summary statistics (averaged across channels).
-    This is a faster alternative to per-channel features for CTGAN.
+    Compute compact EEG summary statistics.
+    Uses ~20 features instead of per-channel features for CTGAN compatibility.
     """
     n_channels, n_timepoints = eeg_data.shape
     features = {}
@@ -215,25 +215,23 @@ def compute_summary_statistics(eeg_data, sampling_rate=256):
     features['global_range'] = features['global_max'] - features['global_min']
     features['global_rms'] = np.sqrt(np.mean(eeg_data**2))
     
-    # Per-channel summary statistics (averaged)
+    # Compute features across ALL channels then average
     all_means = []
     all_stds = []
-    all_skews = []
-    all_kurtoses = []
     all_hjorth_activity = []
     all_hjorth_mobility = []
     all_hjorth_complexity = []
     
-    band_powers = {band: [] for band in FREQ_BANDS}
+    band_power_totals = {band: [] for band in FREQ_BANDS}
     spectral_entropies = []
+    
+    nperseg = min(256, n_timepoints)
     
     for ch_idx in range(n_channels):
         ch_data = eeg_data[ch_idx, :]
         
         all_means.append(np.mean(ch_data))
         all_stds.append(np.std(ch_data))
-        all_skews.append(float(stats.skew(ch_data)))
-        all_kurtoses.append(float(stats.kurtosis(ch_data)))
         
         # Hjorth parameters
         diff1 = np.diff(ch_data)
@@ -248,33 +246,28 @@ def compute_summary_statistics(eeg_data, sampling_rate=256):
         all_hjorth_complexity.append(complexity)
         
         # PSD
-        nperseg = min(256, n_timepoints)
         freqs, psd = welch(ch_data, fs=sampling_rate, nperseg=nperseg)
         total_power = np.trapz(psd, freqs)
         
         for band_name, (low, high) in FREQ_BANDS.items():
             band_mask = (freqs >= low) & (freqs <= high)
             band_power = np.trapz(psd[band_mask], freqs[band_mask])
-            band_powers[band_name].append(band_power / (total_power + 1e-10))
+            band_power_totals[band_name].append(band_power / (total_power + 1e-10))
         
         psd_norm = psd / (np.sum(psd) + 1e-10)
         spectral_entropies.append(-np.sum(psd_norm * np.log2(psd_norm + 1e-10)))
     
-    # Aggregate features
+    # Average across channels
     features['mean_amplitude'] = np.mean(all_means)
     features['std_amplitude'] = np.mean(all_stds)
-    features['mean_skewness'] = np.mean(all_skews)
-    features['mean_kurtosis'] = np.mean(all_kurtoses)
     features['mean_hjorth_activity'] = np.mean(all_hjorth_activity)
     features['mean_hjorth_mobility'] = np.mean(all_hjorth_mobility)
     features['mean_hjorth_complexity'] = np.mean(all_hjorth_complexity)
     
     for band_name in FREQ_BANDS:
-        features[f'mean_{band_name}_power'] = np.mean(band_powers[band_name])
-        features[f'std_{band_name}_power'] = np.std(band_powers[band_name])
+        features[f'mean_{band_name}_power'] = np.mean(band_power_totals[band_name])
     
     features['mean_spectral_entropy'] = np.mean(spectral_entropies)
-    features['std_spectral_entropy'] = np.std(spectral_entropies)
     
     # Cross-channel correlation summary
     if n_channels > 1:
@@ -554,13 +547,13 @@ def train_ctgan(real_data_df, config):
         else:
             metadata.add_column(col, sdtype='categorical')
     
-    # Configure CTGAN
+    # Configure CTGAN - use smaller network for limited real data
     synthesizer = CTGANSynthesizer(
         metadata,
-        epochs=config.get('epochs', 300),
-        batch_size=config.get('batch_size', 500),
-        generator_dim=tuple(config.get('generator_dim', [256, 256])),
-        discriminator_dim=tuple(config.get('discriminator_dim', [256, 256])),
+        epochs=config.get('epochs', 500),
+        batch_size=config.get('batch_size', 100),
+        generator_dim=(128, 128),
+        discriminator_dim=(128, 128),
         verbose=True,
     )
     
@@ -630,7 +623,7 @@ def validate_synthetic_data(real_df, synthetic_df, output_dir):
             report['ks_tests'][col] = {
                 'statistic': float(statistic),
                 'p_value': float(p_value),
-                'pass': p_value > 0.05  # Fail to reject null hypothesis
+                'pass': bool(p_value > 0.05)  # Fail to reject null hypothesis
             }
             
             if p_value > 0.05:
@@ -784,7 +777,7 @@ def main():
     for patient_id, edf_paths in patient_files.items():
         print(f"\nProcessing {patient_id} ({len(edf_paths)} files)...")
         
-        for edf_path in edf_paths[:5]:  # Limit to 5 files per patient for speed
+        for edf_path in edf_paths:
             # Extract EEG features
             eeg_features = extract_eeg_features_for_file(edf_path, sampling_rate)
             
