@@ -420,23 +420,76 @@ After running the pipeline:
 
 ---
 
+### Phase 8: XGBoost Retraining Attempts (v5.1 → v6)
+
+#### v5.1: Real Population Genetics Training
+- Attempted to retrain XGBoost with realistic synthetic data
+- Results: AUC=0.55, AUC-PR=0.65, Recall=49.5%
+- Problem: Model could not learn useful patterns from realistic data
+
+#### v5.2: Increased Data + Enhanced Features
+- Generated 50,000 synthetic patients
+- Added 12 interaction features
+- Results: AUC=0.56, Recall=49.1%
+- Still poor — model learning noise, not signal
+
+#### v6: Trainability Adjustments
+- 15x carrier frequency scaling
+- Stronger interaction signals (5x boost)
+- Results: AUC=0.45 (WORSE than random)
+- **Conclusion**: Realistic data fundamentally incompatible with current approach
+
+### Phase 9: Fusion Layer Implementation
+
+#### Decision: Use Old Model as Feature Extractor
+- **OLD XGBoost model** (AUC=0.739) learned useful patterns despite unrealistic data
+- Feed its continuous risk scores (0.0-1.0) to the fusion layer
+- Do NOT retrain — the old model's probability output is sufficient
+
+#### Files Created/Modified:
+
+1. **`src/training/fusion.py`** — Complete fusion layer implementation
+   - `AttentionGateFusion`: α·P_eeg + (1-α)·P_genetic with learned per-patient weighting
+   - `EEGBranchWrapper`: Loads frozen BiLSTM, extracts 64-dim embeddings
+   - `GeneticBranchWrapper`: Loads frozen XGBoost, outputs risk scores
+   - `FusionTrainer`: Training loop with early stopping
+   - `FusionInference`: Real-time prediction interface
+
+2. **`scripts/train_fusion.py`** — Fusion training pipeline
+   - Loads frozen EEG + Genetic models
+   - Trains attention gate on validation data
+   - Generates 5 publication-quality plots
+   - Supports synthetic data for testing
+
+3. **`scripts/evaluate_fusion.py`** — End-to-end evaluation
+   - Compares Fusion vs EEG-only vs Genetic-only
+   - ROC, PR, calibration, attention distribution plots
+   - Detailed metrics (AUC, F1, Recall, Specificity, MCC)
+
+---
+
 ## Known Issues / TODO
 
-1. **Fusion Layer**: Not yet implemented — needs to combine EEG embeddings (64-dim) with genetic embeddings (64-dim)
-2. **End-to-End Evaluation**: Need to test full pipeline on held-out test set
-3. **CTGAN Quality**: KS pass rate was 0% in first run — need to check if feature reduction helped
-4. **Limited Real Data**: Only 279 EDF files (11 patients) — CTGAN needs more real data for good distributions
-5. **Genetic Data Simulation**: CHB-MIT has no real genetic data — all genetic profiles are simulated using population carrier frequencies
+1. **CTGAN Quality**: KS pass rate was 0% in first run — need to check if feature reduction helped
+2. **Limited Real Data**: Only 279 EDF files (11 patients) — CTGAN needs more real data
+3. **Genetic Data Simulation**: CHB-MIT has no real genetic data — all profiles are simulated
 
 ---
 
 ## Next Steps
 
-1. **Run XGBoost v2 training** — Verify improved AUC and recall
-2. **Build fusion layer** — Combine EEG BiLSTM embeddings with XGBoost genetic predictions
-3. **End-to-end evaluation** — Test complete system on `all_patients_test.csv`
-4. **Hyperparameter tuning** — Optimize fusion layer weights, decision thresholds
-5. **Check CTGAN results** — Verify KS pass rate improved with feature reduction
+See **`tobedone.md`** for the complete roadmap.
+
+**Summary of Next Steps:**
+
+1. ~~Build Fusion Layer~~ — ✅ DONE
+2. ~~Modify EEG Branch~~ — ✅ DONE (added `get_embedding()` method)
+3. **Train Fusion** — Run `scripts/train_fusion.py` on cloud PC
+4. **End-to-End Evaluation** — Run `scripts/evaluate_fusion.py` on held-out test set
+5. **FastAPI Backend** — REST API for real-time predictions
+6. **React Dashboard** — Real-time clinical monitoring interface
+
+**Key Decision**: Use the old XGBoost model (AUC=0.739) as a **feature extractor**, not a classifier. Feed continuous risk scores (0.0-1.0) to the fusion layer.
 
 ---
 
@@ -444,15 +497,18 @@ After running the pipeline:
 
 | File | Purpose |
 |------|---------|
-| `scripts/train_xgboost_genetic.py` | **NEW** — Comprehensive XGBoost training with SHAP + 10 plots |
-| `scripts/generate_synthetic_genetic_patients.py` | **UPDATED** — v5 with real population genetics from ClinVar/gnomAD/GWAS |
-| `src/data_pipeline/genetic_feature_engineering.py` | **UPDATED** — v2 with 22-dim vectors + 7 pLI scores |
-| `data/raw/clinvar/epilepsy_variants.csv` | **SOURCE** — 13,331 pathogenic variants used for carrier frequencies |
-| `data/raw/gnomad/pli_scores.csv` | **SOURCE** — pLI, o/e LoF scores used for risk weights |
-| `data/raw/gwas/epilepsy_snps.csv` | **SOURCE** — 15 GWAS SNPs used for PRS computation |
-| `seizure_prediction/generate_ctgan_data.py` | CTGAN synthetic data generation |
+| `src/training/fusion.py` | **NEW** — Fusion layer model, trainer, inference class |
+| `scripts/train_fusion.py` | **NEW** — Fusion training pipeline with plots |
+| `scripts/evaluate_fusion.py` | **NEW** — End-to-end evaluation with comparison plots |
+| `seizure_prediction/libModelLSTM.py` | **MODIFIED** — Added `get_embedding()` method for fusion |
+| `scripts/train_xgboost_genetic.py` | Comprehensive XGBoost training with SHAP + 10 plots |
+| `scripts/generate_synthetic_genetic_patients.py` | v6 with trainability adjustments |
+| `src/data_pipeline/genetic_feature_engineering.py` | v2 with 22-dim vectors + 7 pLI scores |
+| `data/raw/clinvar/epilepsy_variants.csv` | SOURCE — 13,331 pathogenic variants |
+| `data/raw/gnomad/pli_scores.csv` | SOURCE — pLI, o/e LoF scores |
+| `data/raw/gwas/epilepsy_snps.csv` | SOURCE — 15 GWAS SNPs |
 | `configs/config.yaml` | All project configuration |
 
 ---
 
-*Last updated: June 2026 — v5: Real Population Genetics from ClinVar/gnomAD/GWAS*
+*Last updated: June 2026 — Phase 9: Fusion Layer Implementation (Complete)*

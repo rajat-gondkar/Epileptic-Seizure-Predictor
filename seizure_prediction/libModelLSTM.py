@@ -79,6 +79,37 @@ class clsLSTM(nn.Module):
         return arrOutput, arrHiddenOut
     
     
+    def get_embedding(self, argDataIn, argHiddenIn):
+        """
+        Extract the EEG embedding (attention-weighted LSTM output) for fusion.
+        
+        Returns the 512-dim context vector BEFORE the FC layer.
+        This embedding captures the temporal patterns in EEG that are
+        relevant for seizure prediction.
+        
+        Args:
+            argDataIn: Input EEG data (batch_size, time_steps, features_dim)
+            argHiddenIn: Initial hidden state
+            
+        Returns:
+            embedding: Context vector (batch_size, lstm_output_dim) = (batch, 512)
+            risk_score: Class probabilities (batch_size, output_size) = (batch, 3)
+        """
+        # Feed input through bidirectional LSTM
+        arrLSTMOut, arrHiddenOut = self.LSTMLayer(argDataIn.float(), argHiddenIn)
+        
+        # Attention: compute weights over time steps
+        attn_scores = self.AttentionLayer(arrLSTMOut)          # (batch, time, 1)
+        attn_weights = torch.softmax(attn_scores, dim=1)      # (batch, time, 1)
+        embedding = torch.sum(arrLSTMOut * attn_weights, dim=1)  # (batch, lstm_output_dim)
+        
+        # Get risk score from FC layer
+        arrDropoutOut = self.DropoutLayer(embedding)
+        risk_score = self.FCLayer(arrDropoutOut)
+        
+        return embedding, risk_score
+    
+    
     # Initialize the hidden and cell states with zeros
     def initHidden(self, argBatchSize, argTrainOnGPU = False, argDebug = False):
         # For bidirectional LSTM, num_directions=2; hidden state shape:

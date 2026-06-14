@@ -472,14 +472,24 @@ def main():
 
     # Extract features for ALL files with their patient's genetic profile
     real_records = []
+    file_count = 0
+    fail_count = 0
+    total_files = sum(len(paths) for paths in patient_files.values())
+
     for patient_id, edf_paths in patient_files.items():
         genetics = patient_genetics[patient_id]
+        print(f"\nProcessing {patient_id} ({len(edf_paths)} files)...")
 
         for edf_path in edf_paths:
+            file_count += 1
             # EEG features
             eeg_features = extract_eeg_features_for_file(edf_path, sampling_rate)
             if eeg_features is None:
+                fail_count += 1
                 continue
+
+            if file_count % 20 == 0:
+                print(f"  Progress: {file_count}/{total_files} files ({fail_count} failed)")
 
             # Annotation
             has_seizure, seizure_ratio, preictal_ratio = parse_annotation_file(edf_path)
@@ -505,6 +515,7 @@ def main():
 
             real_records.append(record)
 
+    print(f"\nExtraction complete: {len(real_records)} success, {fail_count} failed out of {total_files}")
     real_df = pd.DataFrame(real_records)
     print(f"\nReal combined dataset: {real_df.shape}")
     print(f"Features: {list(real_df.columns)}")
