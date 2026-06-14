@@ -408,8 +408,19 @@ def main():
         # Step 1: Load real genetic data (CTGAN-generated, same as XGBoost training)
         print(f"\n  [1/3] Loading genetic data from {args.genetic_features}")
         df = pd.read_csv(args.genetic_features)
-        feature_cols = [c for c in df.columns if c not in ['patient_id', 'has_seizure', 'preictal_ratio']]
-        genetic_features = df[feature_cols].values
+        
+        # Import FEATURE_NAMES to select only the 22 features XGBoost was trained on
+        sys.path.insert(0, str(PROJECT_ROOT / 'src' / 'data_pipeline'))
+        from genetic_feature_engineering import FEATURE_NAMES
+        
+        # Filter to only the columns XGBoost expects
+        available_features = [f for f in FEATURE_NAMES if f in df.columns]
+        missing_features = [f for f in FEATURE_NAMES if f not in df.columns]
+        
+        if missing_features:
+            print(f"    WARNING: Missing features: {missing_features}")
+        
+        genetic_features = df[available_features].values
         labels = df['has_seizure'].values
         print(f"    Patients: {len(labels)}")
         print(f"    Seizure rate: {labels.mean()*100:.1f}% ({int(labels.sum())} positive)")
@@ -504,8 +515,9 @@ def main():
             xgb_model = load_xgboost_model(args.xgb_model)
             
             df = pd.read_csv(args.genetic_features)
-            feature_cols = [c for c in df.columns if c not in ['patient_id', 'has_seizure', 'preictal_ratio']]
-            genetic_features = df[feature_cols].values
+            from genetic_feature_engineering import FEATURE_NAMES
+            available = [f for f in FEATURE_NAMES if f in df.columns]
+            genetic_features = df[available].values
             
             genetic_scores = extract_genetic_scores(xgb_model, genetic_features)
             labels = df['has_seizure'].values
@@ -514,8 +526,9 @@ def main():
         print("Using real genetic data with synthetic EEG embeddings...")
         
         df = pd.read_csv(args.genetic_features)
-        feature_cols = [c for c in df.columns if c not in ['patient_id', 'has_seizure', 'preictal_ratio']]
-        genetic_features = df[feature_cols].values
+        from genetic_feature_engineering import FEATURE_NAMES
+        available = [f for f in FEATURE_NAMES if f in df.columns]
+        genetic_features = df[available].values
         labels = df['has_seizure'].values
         
         xgb_model = load_xgboost_model(args.xgb_model)
