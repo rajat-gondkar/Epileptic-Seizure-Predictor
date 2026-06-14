@@ -176,7 +176,7 @@ def generate_synthetic_data(n_samples: int = 5000, seed: int = 42) -> tuple:
     Generate synthetic data for testing the fusion layer.
     
     Creates realistic-looking EEG embeddings (512-dim, matching BiLSTM output)
-    and genetic scores with a known relationship to labels.
+    and genetic scores with a noisy, realistic relationship to labels.
     
     Returns:
         eeg_embeddings: np.array (n_samples, 512)
@@ -189,18 +189,21 @@ def generate_synthetic_data(n_samples: int = 5000, seed: int = 42) -> tuple:
     labels = (rng.random(n_samples) < 0.10).astype(np.float32)
     
     # Generate EEG embeddings (512-dim to match BiLSTM output)
-    # Positive samples have different distribution
+    # Use correlated features with heavy noise to simulate realistic data
     eeg_embeddings = rng.randn(n_samples, 512).astype(np.float32)
-    eeg_embeddings[labels == 1] += 0.5  # Slight shift for positives
+    # Add subtle signal (not trivially separable)
+    signal = rng.randn(512) * 0.15
+    eeg_embeddings[labels == 1] += signal
     
-    # Generate genetic scores (correlated with labels)
+    # Generate genetic scores (weakly correlated with labels)
     genetic_scores = rng.beta(2, 5, size=(n_samples, 1)).astype(np.float32)
-    # Make positive samples have higher genetic scores
-    genetic_scores[labels == 1] = np.clip(
-        genetic_scores[labels == 1] + 0.3, 0, 1
-    )
+    # Add weak signal with lots of noise
+    noise = rng.randn(n_samples, 1) * 0.3
+    genetic_scores = np.clip(genetic_scores + noise * labels.reshape(-1, 1) * 0.2, 0, 1)
     
-    return eeg_embeddings, genetic_scores, labels
+    # Shuffle to avoid ordering artifacts
+    idx = rng.permutation(n_samples)
+    return eeg_embeddings[idx], genetic_scores[idx], labels[idx]
 
 
 # ============================================================
@@ -299,7 +302,17 @@ def plot_attention_distribution(attention_weights, save_path):
     """Plot distribution of attention weights."""
     fig, ax = plt.subplots(figsize=(8, 6))
     
-    ax.hist(attention_weights, bins=50, edgecolor='black', alpha=0.7)
+    # Handle case where all values are identical
+    unique_vals = np.unique(attention_weights)
+    if len(unique_vals) <= 1:
+        # All values are the same - show as single bar
+        ax.bar([unique_vals[0]], [len(attention_weights)], width=0.02, 
+               edgecolor='black', alpha=0.7)
+        ax.set_xlim(unique_vals[0] - 0.1, unique_vals[0] + 0.1)
+    else:
+        n_bins = min(50, len(unique_vals))
+        ax.hist(attention_weights, bins=n_bins, edgecolor='black', alpha=0.7)
+    
     ax.axvline(x=np.mean(attention_weights), color='r', linestyle='--', 
                label=f'Mean = {np.mean(attention_weights):.3f}')
     ax.set_xlabel('Attention Weight α (EEG contribution)', fontsize=14)
@@ -389,63 +402,94 @@ def main():
             n_samples=5000, seed=args.seed
         )
     elif args.eeg_model:
-        # Extract EEG embeddings from model
-        print(f"Extracting EEG embeddings from model: {args.eeg_model}")
+        # Use real genetic data + extract EEG embeddings from model
+        print(f"Using real genetic data + EEG model: {args.eeg_model}")
         
-        # We need to load the EEG dataset to extract embeddings
-        # Import the dataset class
-        sys.path.insert(0, str(PROJECT_ROOT / 'seizure_prediction'))
-        from libCHBMITDataset import CHBMITDataset
+        # Step 1: Load real genetic data (CTGAN-generated, same as XGBoost training)
+        print(f"\n  [1/3] Loading genetic data from {args.genetic_features}")
+        df = pd.read_csv(args.genetic_features)
+        feature_cols = [c for c in df.columns if c not in ['patient_id', 'has_seizure', 'preictal_ratio']]
+        genetic_features = df[feature_cols].values
+        labels = df['has_seizure'].values
+        print(f"    Patients: {len(labels)}")
+        print(f"    Seizure rate: {labels.mean()*100:.1f}% ({int(labels.sum())} positive)")
+        print(f"    Features: {genetic_features.shape[1]} dimensions")
         
-        # Load dataset
-        csv_train = PROJECT_ROOT / 'seizure_prediction' / 'DataCSVs' / 'CHBMIT' / 'all_patients_train.csv'
-        csv_test = PROJECT_ROOT / 'seizure_prediction' / 'DataCSVs' / 'CHBMIT' / 'all_patients_test.csv'
+        # Step 2: Compute genetic risk scores from XGBoost
+        print(f"\n  [2/3] Computing genetic risk scores from XGBoost model...")
+        xgb_model = load_xgboost_model(args.xgb_model)
+        genetic_scores = extract_genetic_scores(xgb_model, genetic_features)
+        print(f"    Risk score range: [{genetic_scores.min():.3f}, {genetic_scores.max():.3f}]")
+        print(f"    Mean risk score: {genetic_scores.mean():.3f}")
         
-        if csv_train.exists() and csv_test.exists():
-            print(f"  Loading EEG dataset from CSVs...")
-            train_dataset = CHBMITDataset(csv_train, segment_len=10, preprocess=True)
-            test_dataset = CHBMITDataset(csv_test, segment_len=10, preprocess=True)
-            
-            # Extract embeddings for train and test
-            print(f"  Extracting train embeddings ({len(train_dataset)} windows)...")
-            eeg_embeddings_train, labels_train = extract_eeg_embeddings_from_model(
-                args.eeg_model, train_dataset, device='cpu', batch_size=16
-            )
-            
-            print(f"  Extracting test embeddings ({len(test_dataset)} windows)...")
-            eeg_embeddings_test, labels_test = extract_eeg_embeddings_from_model(
-                args.eeg_model, test_dataset, device='cpu', batch_size=16
-            )
-            
-            # Combine
-            eeg_embeddings = np.concatenate([eeg_embeddings_train, eeg_embeddings_test], axis=0)
-            eeg_labels = np.concatenate([labels_train, labels_test], axis=0)
-            
-            # Save embeddings for future use
-            save_path = output_dir / 'eeg_embeddings.npz'
-            np.savez(save_path, embeddings=eeg_embeddings, labels=eeg_labels)
-            print(f"  Saved embeddings to {save_path}")
+        # Step 3: Extract EEG embeddings from trained BiLSTM
+        print(f"\n  [3/3] Extracting EEG embeddings from BiLSTM...")
+        
+        # Check for cached embeddings first
+        cached_embeddings = output_dir / 'eeg_embeddings.npz'
+        if cached_embeddings.exists():
+            print(f"    Found cached embeddings: {cached_embeddings}")
+            cache = np.load(cached_embeddings)
+            eeg_all = cache['embeddings']
+            print(f"    Loaded {len(eeg_all)} cached embeddings (dim={eeg_all.shape[1]})")
         else:
-            print(f"  WARNING: EEG dataset CSVs not found at {csv_train}")
-            print(f"  Falling back to synthetic data...")
-            eeg_embeddings, genetic_scores, labels = generate_synthetic_data(
-                n_samples=5000, seed=args.seed
-            )
-            args.use_synthetic = True
+            # Try to load real EEG dataset
+            csv_train = Path('seizure_prediction/DataCSVs/CHB-MIT/all_patients_train.csv')
+            csv_test = Path('seizure_prediction/DataCSVs/CHB-MIT/all_patients_test.csv')
+            
+            if csv_train.exists() and csv_test.exists():
+                print(f"    Loading EEG dataset from CHB-MIT CSVs...")
+                sys.path.insert(0, str(PROJECT_ROOT / 'seizure_prediction'))
+                from libCHBMITDataset import CHBMITDataset
+                
+                train_dataset = CHBMITDataset(str(csv_train), segment_len=10, preprocess=True)
+                test_dataset = CHBMITDataset(str(csv_test), segment_len=10, preprocess=True)
+                
+                print(f"    Train windows: {len(train_dataset)}")
+                print(f"    Test windows: {len(test_dataset)}")
+                
+                eeg_emb_train, _ = extract_eeg_embeddings_from_model(
+                    args.eeg_model, train_dataset, device='cpu', batch_size=16
+                )
+                eeg_emb_test, _ = extract_eeg_embeddings_from_model(
+                    args.eeg_model, test_dataset, device='cpu', batch_size=16
+                )
+                
+                eeg_all = np.concatenate([eeg_emb_train, eeg_emb_test], axis=0)
+                
+                # Cache for future runs
+                np.savez(cached_embeddings, embeddings=eeg_all)
+                print(f"    Saved {len(eeg_all)} embeddings to cache")
+            else:
+                print(f"    WARNING: EEG CSVs not found at:")
+                print(f"      {csv_train.absolute()}")
+                print(f"      {csv_test.absolute()}")
+                print(f"    Generating synthetic EEG embeddings based on genetic risk...")
+                rng = np.random.RandomState(args.seed)
+                eeg_all = rng.randn(len(labels), 512).astype(np.float32)
+                # Correlate with genetic risk (weak signal)
+                signal = rng.randn(512) * 0.05
+                eeg_all += np.outer(genetic_scores.flatten(), signal)
         
-        # Compute genetic scores
-        if not args.use_synthetic:
-            print("Computing genetic scores from XGBoost model...")
-            xgb_model = load_xgboost_model(args.xgb_model)
-            
-            df = pd.read_csv(args.genetic_features)
-            feature_cols = [c for c in df.columns if c not in ['patient_id', 'has_seizure', 'preictal_ratio']]
-            genetic_features = df[feature_cols].values
-            
-            genetic_scores = extract_genetic_scores(xgb_model, genetic_features)
-            
-            # Match labels from genetic data (since we combined train+test)
-            labels = np.tile(df['has_seizure'].values, len(eeg_embeddings) // len(df) + 1)[:len(eeg_embeddings)]
+        # Match EEG embeddings to genetic data
+        # Each patient may have multiple EEG windows
+        n_patients = len(labels)
+        n_eeg = len(eeg_all)
+        
+        if n_eeg >= n_patients:
+            # More EEG windows than patients - subsample
+            indices = np.linspace(0, n_eeg - 1, n_patients).astype(int)
+            eeg_embeddings = eeg_all[indices]
+        else:
+            # Fewer EEG windows - tile to match
+            n_repeat = n_patients // n_eeg + 1
+            eeg_embeddings = np.tile(eeg_all, (n_repeat, 1))[:n_patients]
+        
+        print(f"\n    Final shapes:")
+        print(f"      EEG embeddings: {eeg_embeddings.shape}")
+        print(f"      Genetic scores: {genetic_scores.shape}")
+        print(f"      Labels: {labels.shape}")
+        
     elif args.eeg_embeddings:
         # Load pre-computed embeddings
         print(f"Loading EEG embeddings from {args.eeg_embeddings}")
@@ -459,7 +503,6 @@ def main():
             print("Computing genetic scores from XGBoost model...")
             xgb_model = load_xgboost_model(args.xgb_model)
             
-            # Load genetic features
             df = pd.read_csv(args.genetic_features)
             feature_cols = [c for c in df.columns if c not in ['patient_id', 'has_seizure', 'preictal_ratio']]
             genetic_features = df[feature_cols].values
@@ -467,10 +510,25 @@ def main():
             genetic_scores = extract_genetic_scores(xgb_model, genetic_features)
             labels = df['has_seizure'].values
     else:
-        print("Using synthetic data for testing...")
-        eeg_embeddings, genetic_scores, labels = generate_synthetic_data(
-            n_samples=5000, seed=args.seed
-        )
+        # Use real genetic data only (no EEG model specified)
+        print("Using real genetic data with synthetic EEG embeddings...")
+        
+        df = pd.read_csv(args.genetic_features)
+        feature_cols = [c for c in df.columns if c not in ['patient_id', 'has_seizure', 'preictal_ratio']]
+        genetic_features = df[feature_cols].values
+        labels = df['has_seizure'].values
+        
+        xgb_model = load_xgboost_model(args.xgb_model)
+        genetic_scores = extract_genetic_scores(xgb_model, genetic_features)
+        
+        # Generate synthetic EEG embeddings that correlate with genetic risk
+        rng = np.random.RandomState(args.seed)
+        eeg_embeddings = rng.randn(len(labels), 512).astype(np.float32)
+        # Add weak signal correlated with genetic risk
+        signal = rng.randn(512) * 0.1
+        eeg_embeddings += np.outer(genetic_scores.flatten(), signal)
+        
+        print(f"  Patients: {len(labels)}, Positive: {labels.sum()} ({labels.mean()*100:.1f}%)")
     
     print(f"  EEG embeddings: {eeg_embeddings.shape}")
     print(f"  Genetic scores: {genetic_scores.shape}")
