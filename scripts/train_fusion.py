@@ -342,6 +342,8 @@ def plot_score_comparison(y_true, eeg_scores, genetic_scores, fused_scores, save
 # ============================================================
 def main():
     parser = argparse.ArgumentParser(description="Train Fusion Layer")
+    parser.add_argument('--eeg-model', type=str, default=None,
+                        help="Path to trained BiLSTM model (.net) - extracts embeddings automatically")
     parser.add_argument('--eeg-embeddings', type=str, default=None,
                         help="Path to pre-computed EEG embeddings (.npz)")
     parser.add_argument('--genetic-scores', type=str, default=None,
@@ -381,12 +383,70 @@ def main():
     # ---- Load or generate data ----
     print("\n--- Loading Data ---")
     
-    if args.use_synthetic or (args.eeg_embeddings is None):
+    if args.use_synthetic:
         print("Using synthetic data for testing...")
         eeg_embeddings, genetic_scores, labels = generate_synthetic_data(
             n_samples=5000, seed=args.seed
         )
-    else:
+    elif args.eeg_model:
+        # Extract EEG embeddings from model
+        print(f"Extracting EEG embeddings from model: {args.eeg_model}")
+        
+        # We need to load the EEG dataset to extract embeddings
+        # Import the dataset class
+        sys.path.insert(0, str(PROJECT_ROOT / 'seizure_prediction'))
+        from libCHBMITDataset import CHBMITDataset
+        
+        # Load dataset
+        csv_train = PROJECT_ROOT / 'seizure_prediction' / 'DataCSVs' / 'CHBMIT' / 'all_patients_train.csv'
+        csv_test = PROJECT_ROOT / 'seizure_prediction' / 'DataCSVs' / 'CHBMIT' / 'all_patients_test.csv'
+        
+        if csv_train.exists() and csv_test.exists():
+            print(f"  Loading EEG dataset from CSVs...")
+            train_dataset = CHBMITDataset(csv_train, segment_len=10, preprocess=True)
+            test_dataset = CHBMITDataset(csv_test, segment_len=10, preprocess=True)
+            
+            # Extract embeddings for train and test
+            print(f"  Extracting train embeddings ({len(train_dataset)} windows)...")
+            eeg_embeddings_train, labels_train = extract_eeg_embeddings_from_model(
+                args.eeg_model, train_dataset, device='cpu', batch_size=16
+            )
+            
+            print(f"  Extracting test embeddings ({len(test_dataset)} windows)...")
+            eeg_embeddings_test, labels_test = extract_eeg_embeddings_from_model(
+                args.eeg_model, test_dataset, device='cpu', batch_size=16
+            )
+            
+            # Combine
+            eeg_embeddings = np.concatenate([eeg_embeddings_train, eeg_embeddings_test], axis=0)
+            eeg_labels = np.concatenate([labels_train, labels_test], axis=0)
+            
+            # Save embeddings for future use
+            save_path = output_dir / 'eeg_embeddings.npz'
+            np.savez(save_path, embeddings=eeg_embeddings, labels=eeg_labels)
+            print(f"  Saved embeddings to {save_path}")
+        else:
+            print(f"  WARNING: EEG dataset CSVs not found at {csv_train}")
+            print(f"  Falling back to synthetic data...")
+            eeg_embeddings, genetic_scores, labels = generate_synthetic_data(
+                n_samples=5000, seed=args.seed
+            )
+            args.use_synthetic = True
+        
+        # Compute genetic scores
+        if not args.use_synthetic:
+            print("Computing genetic scores from XGBoost model...")
+            xgb_model = load_xgboost_model(args.xgb_model)
+            
+            df = pd.read_csv(args.genetic_features)
+            feature_cols = [c for c in df.columns if c not in ['patient_id', 'has_seizure', 'preictal_ratio']]
+            genetic_features = df[feature_cols].values
+            
+            genetic_scores = extract_genetic_scores(xgb_model, genetic_features)
+            
+            # Match labels from genetic data (since we combined train+test)
+            labels = np.tile(df['has_seizure'].values, len(eeg_embeddings) // len(df) + 1)[:len(eeg_embeddings)]
+    elif args.eeg_embeddings:
         # Load pre-computed embeddings
         print(f"Loading EEG embeddings from {args.eeg_embeddings}")
         eeg_embeddings, labels = load_eeg_embeddings(args.eeg_embeddings)
@@ -406,6 +466,11 @@ def main():
             
             genetic_scores = extract_genetic_scores(xgb_model, genetic_features)
             labels = df['has_seizure'].values
+    else:
+        print("Using synthetic data for testing...")
+        eeg_embeddings, genetic_scores, labels = generate_synthetic_data(
+            n_samples=5000, seed=args.seed
+        )
     
     print(f"  EEG embeddings: {eeg_embeddings.shape}")
     print(f"  Genetic scores: {genetic_scores.shape}")
