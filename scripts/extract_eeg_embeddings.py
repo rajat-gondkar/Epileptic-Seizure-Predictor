@@ -31,17 +31,33 @@ CSV_TEST = 'seizure_prediction/DataCSVs/CHB-MIT/all_patients_test.csv'
 OUTPUT_DIR = Path('models/fusion')
 CACHE_FILE = OUTPUT_DIR / 'eeg_embeddings.npz'
 
-TARGET_SEQ_LEN = 1280  # 5 seconds at 256 Hz (model's expected input)
+TARGET_SEQ_LEN = 7680  # 30 seconds at 256 Hz (matches -du 30 -rf 256 training params)
 
 
 def collate_fn(batch):
-    """Pad/truncate all windows to fixed length and stack."""
+    """Pad/truncate all windows to fixed length, select 19 channels, and stack."""
     eeg_windows, labels = zip(*batch)
     
-    # Pad or truncate each window to TARGET_SEQ_LEN
+    # The 19 common channels the model was trained on
+    COMMON_19 = [
+        'FP1-F7', 'F7-T7', 'T7-P7', 'P7-O1',
+        'FP1-F3', 'F3-C3', 'C3-P3', 'P3-O1',
+        'FP2-F4', 'F4-C4', 'C4-P4', 'P4-O2',
+        'FP2-F8', 'F8-T8', 'T8-P8', 'P8-O2',
+        'FZ-CZ', 'CZ-PZ', 'P7-T7'
+    ]
+    
     padded = []
     for w in eeg_windows:
         w = torch.as_tensor(w, dtype=torch.float32)
+        
+        # If more than 19 channels, select common 19
+        if w.shape[1] > 19:
+            # Try to find common channels by name if available
+            # Otherwise just take first 19
+            w = w[:, :19]
+        
+        # Pad or truncate to fixed length
         if w.shape[0] > TARGET_SEQ_LEN:
             w = w[:TARGET_SEQ_LEN]
         elif w.shape[0] < TARGET_SEQ_LEN:
@@ -121,13 +137,22 @@ def main():
     # Load model
     model = load_eeg_model()
     
-    # Load datasets
+    # Load datasets — must match training params: -du 30 -rf 256 -smod 1 -smin -1 -smax 1
+    dataset_kwargs = dict(
+        resampling_freq=256,
+        subseq_duration=30,
+        scaling_params=(1, (-1.0, 1.0)),
+        bandpass_freqs=(0.5, 45.0),
+        zscore_normalize=True,
+        argInfo=True,
+    )
+
     print(f"\nLoading train dataset from {CSV_TRAIN}")
-    train_dataset = CHBMITDataset(CSV_TRAIN, argInfo=False)
+    train_dataset = CHBMITDataset(CSV_TRAIN, **dataset_kwargs)
     print(f"  Train windows: {len(train_dataset)}")
-    
+
     print(f"\nLoading test dataset from {CSV_TEST}")
-    test_dataset = CHBMITDataset(CSV_TEST, argInfo=False)
+    test_dataset = CHBMITDataset(CSV_TEST, **dataset_kwargs)
     print(f"  Test windows: {len(test_dataset)}")
     
     # Extract train embeddings
