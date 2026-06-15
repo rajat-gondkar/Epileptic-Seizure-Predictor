@@ -3,7 +3,7 @@
 ## Project Goal
 Build a multimodal AI system that fuses real-time EEG brain signals with patient-specific genetic biomarkers to predict epileptic seizures before they happen. The system has two branches:
 - **EEG Branch**: BiLSTM+Attention model that processes raw EEG time-series
-- **Genetic Branch**: XGBoost model that processes 22-dimensional genetic feature vectors
+- **Genetic Branch**: XGBoost model that processes 16-dimensional genetic feature vectors
 - **Fusion Layer**: Combines both modalities for final seizure prediction
 
 ---
@@ -79,13 +79,6 @@ Reviewed `models/xgboost_genetic/`:
 - Trained on 5000 synthetic patients (16-dim vectors)
 - Uses `scripts/generate_synthetic_genetic_patients.py` for data generation
 
-**Problems identified**:
-1. **Feature importance inverted**: Model relied on aggregate features (ion_channel_burden, mutation_burden) instead of individual gene mutations
-2. **Class imbalance mismatch**: Training data had ~70% seizure rate (should be ~5%)
-3. **Low recall (55.3%)**: Model missed 45% of seizure patients
-4. **No SHAP analysis**: Missing biological interpretability validation
-5. **Trivial learning**: Low label noise (σ=0.1) allowed model to learn arithmetic rules
-
 ### Phase 5: New CTGAN Script Creation
 
 Created `seizure_prediction/generate_ctgan_data.py` — completely rewritten CTGAN pipeline.
@@ -102,7 +95,7 @@ Created `seizure_prediction/generate_ctgan_data.py` — completely rewritten CTG
 1. Load EDF file list from CSV
 2. Extract EEG features from each EDF using pyedflib
 3. Parse annotation files for seizure labels
-4. Build 22-dim genetic profiles per patient
+4. Build 16-dim genetic profiles per patient
 5. Augment real data for CTGAN training
 6. Train CTGAN with SDV library
 7. Generate synthetic samples
@@ -120,62 +113,44 @@ Created `seizure_prediction/generate_ctgan_data.py` — completely rewritten CTG
 
 5. **CTGAN overfitting**: Reduced network size (256→128), batch size (500→100), increased epochs (300→500)
 
-### Phase 7: XGBoost Genetic Branch Improvements (v2 → v5)
+### Phase 7: CTGAN v2 — Separate EEG and Genetic
 
-**Date**: June 2026
+**Problem**: CTGAN treated genetic features (binary flags, bounded ratios) as continuous, producing negative mutations, negative ratios, and varying pLI scores.
 
-#### v2: Initial Improvements
-- Fixed class balance: ~5% seizure rate (was ~70%)
-- Increased label noise: σ=0.6 (was σ=0.1)
-- Added gene-gene interaction features
-- Expanded feature vector: 16 → 22 dimensions
-- Added SHAP analysis and 10 publication-quality plots
+**Solution**: Separate CTGAN (EEG) from direct sampling (genetic).
 
-#### v5: Real Population Genetics (Current)
-**Problem**: Previous versions used hand-crafted carrier frequencies (e.g., "10% for SCN1A") which are unrealistic. Real pathogenic variant carrier frequency for SCN1A is ~0.1-0.5%, not 10%.
+**Result**: 
+- KS Pass Rate: 0% — CTGAN still couldn't learn EEG distributions
+- Genetic features were perfect
+- But cross-modal relationships destroyed (random pairing)
 
-**Solution**: Derived ALL parameters from raw data files:
+### Phase 8: CTGAN v3 — Joint Training
 
-1. **`scripts/generate_synthetic_genetic_patients.py`** (v5 — Real Population Genetics)
-   - **Carrier frequencies from ClinVar + gnomAD**:
-     - SCN1A: 4975 variants in ClinVar + 2 observed LoF in gnomAD → ~0.12% carrier freq
-     - KCNQ2: 1839 variants → ~0.05%
-     - All frequencies derived, not hand-picked
-   - **Risk weights from ClinVar burden × gnomAD constraint**:
-     - burden_fraction = gene_variants / total_variants
-     - constraint = 1 - o/e_LoF (from gnomAD)
-     - risk_weight = normalized(burden × constraint × pLI)
-   - **Seizure penetrance from literature**:
-     - SCN1A: 80% (Dravet syndrome)
-     - KCNQ2: 70% (neonatal DEE)
-     - Scaled by gene risk weight
-   - **PRS from real GWAS**: Hardy-Weinberg simulation with real risk allele frequencies
-   - **Label noise**: σ=0.15 (log-odds space) — realistic biological variation
-   - **Baseline seizure rate**: 1% (general population prevalence)
+**Approach**: Train CTGAN on COMBINED EEG+genetic data (37 columns) to preserve cross-modal relationships. Clip bounded features after generation.
 
-#### v5.1: Bug Fixes (June 2026)
-- Fixed seizure rate from 29% → ~1-3% by using log-odds space for probability calculation
-- Added missing `mutation_burden` feature to generated CSV
-- Mutation effects now properly scaled in log-odds space
+**Final Results** (from `synthetic/validation_report.json`):
 
-**Files Modified/Created**:
+| Metric | Value | Verdict |
+|--------|-------|---------|
+| KS Pass Rate | 31.6% (12/38) | Partial |
+| Genetic features | 12/12 pass | Perfect |
+| EEG features | 0/19 pass | Bad |
+| Sanity checks | All pass | Perfect |
+| Correlation diff | 0.235 | High |
+| Correlation corr | 0.453 | Low |
 
-1. **`scripts/generate_synthetic_genetic_patients.py`** (v5.1)
-   - Loads real ClinVar variant counts
-   - Loads real gnomAD pLI, o/e LoF scores
-   - Loads real GWAS risk allele frequencies
-   - Derives carrier frequencies computationally
-   - Derives risk weights from gene burden × constraint
-   - Outputs debug info (seizure_prob, n_mutations)
-   - Fixed: seizure probability calculated in log-odds space
-   - Fixed: includes mutation_burden feature
+**What's working**:
+- All genetic features pass KS tests
+- No negative mutations, proper bounds
+- pLI scores constant at 1.0
+- Binary features are binary
 
-2. **`src/data_pipeline/genetic_feature_engineering.py`** (v2)
-   - 22-dim feature vectors with extended pLI scores
-   - Interaction features for SHAP analysis
+**What's NOT working**:
+- EEG features have KS stats 0.13-0.38 (should be <0.05)
+- Only 279 real samples → CTGAN can't learn complex EEG distributions
+- Correlation structure not preserved well
 
-3. **`scripts/train_xgboost_genetic.py`** (v2)
-   - Comprehensive training with SHAP + 10 plots
+**Decision**: Use synthetic data as **validation set only**, not for fusion training.
 
 ---
 
@@ -184,7 +159,7 @@ Created `seizure_prediction/generate_ctgan_data.py` — completely rewritten CTG
 ```
 eeg-genetic-fusion/
 ├── seizure_prediction/                    # NEW PIPELINE (canonical)
-│   ├── generate_ctgan_data.py            # NEW: CTGAN synthetic data generation
+│   ├── generate_ctgan_data.py            # NEW: CTGAN synthetic data (v3)
 │   ├── setup_chbmit.py                   # CHB-MIT data setup
 │   ├── libCHBMITDataset.py              # PyTorch Dataset (lazy loading)
 │   ├── libDataIO.py                      # EDF reading, annotation parsing
@@ -200,12 +175,11 @@ eeg-genetic-fusion/
 │   └── Results/                          # Test results
 │
 ├── src/data_pipeline/
-│   ├── genetic_feature_engineering.py    # 22-dim vector construction (v2)
+│   ├── genetic_feature_engineering.py    # 16-dim vector construction
 │   └── prs_computation.py               # Polygenic Risk Score calculation
 │
 ├── scripts/
-│   ├── generate_synthetic_genetic_patients.py  # 10000 synthetic patients (v4)
-│   ├── train_xgboost_genetic.py                # NEW: Comprehensive XGBoost training
+│   ├── generate_synthetic_genetic_patients.py  # 5000 synthetic patients
 │   ├── acquire_genetic_data.py                 # ClinVar/gnomAD/GWAS download
 │   └── select_features.py                      # Feature selection
 │
@@ -222,274 +196,96 @@ eeg-genetic-fusion/
 ├── data/processed/
 │   ├── eeg_features/                     # Extracted EEG features
 │   ├── genetic_vectors/
-│   │   └── genetic_training_cohort.csv   # 10000 synthetic genetic patients
+│   │   └── genetic_training_cohort.csv   # 5000 synthetic genetic patients
 │   └── synthetic/
-│       ├── real_eeg_genetic_features.csv # Output: real EEG+genetic features
-│       ├── synthetic_eeg_genetic_data.csv # Output: CTGAN synthetic data
-│       └── validation_report.json        # Output: quality metrics
+│       ├── real_eeg_genetic_features.csv # Real EEG+genetic (279 rows)
+│       ├── synthetic_eeg_genetic_data.csv # CTGAN synthetic (5000 rows)
+│       └── validation_report.json        # Quality metrics
+│
+├── synthetic/                            # Copy of results for review
+│   ├── real_eeg_genetic_features.csv
+│   ├── synthetic_eeg_genetic_data.csv
+│   └── validation_report.json
 │
 ├── models/
-│   └── xgboost_genetic/                  # Trained XGBoost (v2)
-│       ├── xgboost_genetic_model.pkl
-│       ├── xgboost_genetic_metrics.json
-│       ├── cv_results.json
-│       ├── training_log.json
-│       └── plots/
-│           ├── confusion_matrix.png
-│           ├── confusion_matrix_norm.png
-│           ├── roc_curve.png
-│           ├── pr_curve.png
-│           ├── feature_importance.png
-│           ├── threshold_analysis.png
-│           ├── cv_results.png
-│           ├── dashboard.png
-│           ├── shap_summary.png
-│           └── shap_importance.png
+│   └── xgboost_genetic/                  # Trained XGBoost (AUC=0.739)
 │
 ├── configs/
 │   └── config.yaml                       # Master configuration
 │
 ├── requirements_full.txt                 # Complete dependencies
-└── TECHNICAL_REFERENCE.md                # Technical documentation
+├── progress_so_far.md                    # This file
+└── tobedone.md                           # Roadmap
 ```
 
 ---
 
-## 22-Dimensional Genetic Vector Layout (v2)
+## 16-Dimensional Genetic Vector Layout
 
 ```
 Index  Feature                      Description
 -----  -------------------------    --------------------------------
-[0]    SCN1A_mutation                risk_weight × binary flag (1.00)
-[1]    SCN8A_mutation                risk_weight × binary flag (0.85)
-[2]    KCNQ2_mutation                risk_weight × binary flag (0.95)
-[3]    SCN2A_mutation                risk_weight × binary flag (0.90)
-[4]    KCNT1_mutation                risk_weight × binary flag (0.80)
-[5]    DEPDC5_mutation               risk_weight × binary flag (0.65)
-[6]    PCDH19_mutation               risk_weight × binary flag (0.40)
-[7]    GRIN2A_mutation               risk_weight × binary flag (0.55)
-[8]    GABRA1_mutation               risk_weight × binary flag (0.50)
+[0]    SCN1A_mutation                1.0 × binary flag (weight=1.00)
+[1]    SCN8A_mutation                1.0 × binary flag (weight=0.85)
+[2]    KCNQ2_mutation                1.0 × binary flag (weight=0.95)
+[3]    SCN2A_mutation                1.0 × binary flag (weight=0.90)
+[4]    KCNT1_mutation                1.0 × binary flag (weight=0.80)
+[5]    DEPDC5_mutation               1.0 × binary flag (weight=0.65)
+[6]    PCDH19_mutation               1.0 × binary flag (weight=0.40)
+[7]    GRIN2A_mutation               1.0 × binary flag (weight=0.55)
+[8]    GABRA1_mutation               1.0 × binary flag (weight=0.50)
 [9]    SCN1A_pLI                     pLI score (1.0 for SCN1A)
 [10]   SCN8A_pLI                     pLI score (1.0 for SCN8A)
-[11]   KCNQ2_pLI                     pLI score (0.99998)
-[12]   SCN2A_pLI                     pLI score (1.0)
-[13]   GRIN2A_pLI                    pLI score (0.99998)
-[14]   PCDH19_pLI                    pLI score (0.99975)
-[15]   GABRA1_pLI                    pLI score (0.91489)
-[16]   PRS                           Polygenic Risk Score (standardized)
-[17]   sodium_channel_interaction    SCN1A × SCN2A × SCN8A
-[18]   potassium_channel_interaction KCNQ2 × KCNT1
-[19]   receptor_interaction          GABRA1 × GRIN2A
-[20]   prs_tier1_interaction         PRS × Tier-1 carrier flag
-[21]   mutation_burden               Sum of weighted mutations
+[11]   PRS                           Polygenic Risk Score (standardized)
+[12]   mutation_burden               Sum of weighted mutations
+[13]   ion_channel_burden            Sum for ion channel genes only
+[14]   tier1_flag                    1 if any Tier-1 gene carrier
+[15]   SCN1A_severity_proxy          pLI × mutation flag
 ```
 
 ---
 
-## Key Configuration Values
+## Gene Risk Weights (Literature-Backed)
 
-From `configs/config.yaml`:
-
-**EEG Settings**:
-- Sampling rate: 256 Hz (preprocessed to 128 Hz)
-- Channels: 19 standard 10-20 system
-- Bandpass: 0.5-70 Hz
-- Notch: 60 Hz (US power line)
-- Epoch length: 5 seconds
-- Preictal window: 30 minutes
-
-**Genetic Settings**:
-- Target genes: SCN1A, SCN8A, KCNQ2, SCN2A, KCNT1, DEPDC5, PCDH19, GRIN2A, GABRA1
-- pLI genes: SCN1A, SCN8A, KCNQ2, SCN2A, GRIN2A, PCDH19, GABRA1 (7 genes)
-- Feature dimension: 22
-
-**XGBoost Settings (v2)**:
-- n_estimators: 1000
-- max_depth: 5
-- learning_rate: 0.03
-- subsample: 0.8
-- colsample_bytree: 0.8
-- min_child_weight: 5
-- reg_alpha: 0.5
-- reg_lambda: 2.0
-- early_stopping_rounds: 50
-
----
-
-## Gene Risk Weights (Derived from Real Data)
-
-| Gene    | Risk Weight | Carrier Freq | pLI     | ClinVar Variants | gnomAD o/e LoF | Role |
-|---------|-------------|--------------|---------|------------------|----------------|------|
-| SCN1A   | 1.00        | ~0.12%       | 1.000   | 4,975            | 0.023          | Sodium channel, most common epilepsy gene |
-| KCNQ2   | 0.85        | ~0.05%       | 0.99998 | 1,839            | 0.050          | Potassium channel, neonatal seizures |
-| SCN2A   | 0.82        | ~0.04%       | 1.000   | 1,692            | 0.060          | Sodium channel, DEE |
-| SCN8A   | 0.78        | ~0.03%       | 1.000   | 1,019            | 0.062          | Sodium channel, DEE |
-| KCNT1   | 0.55        | ~0.02%       | 0.00003 | 488              | 0.324          | Potassium channel, focal epilepsy |
-| DEPDC5  | 0.50        | ~0.02%       | 0.117   | 975              | 0.235          | mTOR pathway, focal epilepsy |
-| GRIN2A  | 0.60        | ~0.02%       | 0.99998 | 1,009            | 0.082          | Glutamate receptor, focal epilepsy |
-| GABRA1  | 0.45        | ~0.01%       | 0.915   | 300              | 0.142          | GABA receptor, absence epilepsy |
-| PCDH19  | 0.40        | ~0.02%       | 0.99975 | 1,034            | 0.000          | Protocadherin, DEE (females only) |
-
-*Note: Carrier frequencies derived from (ClinVar variants × 0.1 + gnomAD observed LoF) / 250,000 alleles, scaled by 5x*
-*Risk weights = normalized(ClinVar burden fraction × (1 - o/e LoF) × pLI)*
+| Gene    | Risk Weight | Carrier Freq | pLI     | Role |
+|---------|-------------|--------------|---------|------|
+| SCN1A   | 1.00        | 10%          | 1.000   | Sodium channel, most common epilepsy gene |
+| KCNQ2   | 0.95        | 8%           | 0.99998 | Potassium channel, neonatal seizures |
+| SCN2A   | 0.90        | 7%           | 1.000   | Sodium channel, DEE |
+| SCN8A   | 0.85        | 6%           | 1.000   | Sodium channel, DEE |
+| KCNT1   | 0.80        | 5%           | 0.00003 | Potassium channel, focal epilepsy |
+| DEPDC5  | 0.65        | 5%           | 0.117   | mTOR pathway, focal epilepsy |
+| GRIN2A  | 0.55        | 4%           | 0.99998 | Glutamate receptor, focal epilepsy |
+| GABRA1  | 0.50        | 3%           | 0.915   | GABA receptor, absence epilepsy |
+| PCDH19  | 0.40        | 4%           | 0.99975 | Protocadherin, DEE (females only) |
 
 ---
 
 ## Cloud PC Setup Commands
 
 ```bash
-# Navigate to project
 cd /workspace/eeg-genetic-fusion
-
-# Create virtual environment
 python3 -m venv venv
 source venv/bin/activate
-
-# Upgrade pip
 pip install --upgrade pip
-
-# Install all dependencies
-pip install numpy scipy pandas pyyaml pyedflib wfdb scikit-learn matplotlib seaborn tqdm psutil pytz xgboost shap
-
-# Step 1: Generate synthetic genetic cohort (10000 patients)
-# Uses REAL parameters from ClinVar, gnomAD, and GWAS
-python scripts/generate_synthetic_genetic_patients.py --n-patients 10000 --seed 42
-
-# Step 2: Train XGBoost genetic branch (with all plots + SHAP)
-python scripts/train_xgboost_genetic.py --n-patients 10000 --seed 42
+pip install numpy scipy pandas pyyaml pyedflib wfdb scikit-learn matplotlib tqdm psutil pytz sdv ctgan torch
+python seizure_prediction/generate_ctgan_data.py --n-synthetic 5000 --seed 42
 ```
 
 ---
 
-## Data Source Summary
+## CTGAN Synthetic Data — Final Status
 
-| Source | File | What We Extract | Used For |
-|--------|------|-----------------|----------|
-| ClinVar | `epilepsy_variants.csv` | 13,331 pathogenic variants per gene | Carrier frequency, risk weights |
-| gnomAD | `pli_scores.csv` | pLI, o/e LoF, o/e missense per gene | Gene constraint, severity weighting |
-| gnomAD | `gnomad.v2.1.1.lof_metrics.by_gene.txt.bgz` | Full gene constraint metrics | Observed LoF counts |
-| GWAS | `epilepsy_snps.csv` | 15 SNPs with OR, risk allele freq | PRS computation |
+**Purpose**: Validation set only (not for fusion training)
 
----
+**What it's good for**:
+- Checking models don't overfit to training data quirks
+- Testing inference pipeline end-to-end
+- Quick iteration without touching held-out real test set
 
-## Derived Parameters (Computed at Runtime)
-
-**Carrier Frequencies** (from ClinVar + gnomAD):
-- Formula: `(observed_LoF × 0.1 + clinvar_variants × 0.1) / 250,000 × 5`
-- Example: SCN1A = (2 + 497.5) / 250,000 × 5 = 0.12%
-
-**Risk Weights** (from ClinVar burden × gnomAD constraint):
-- Formula: `normalized(burden_fraction × (1 - o/e_LoF) × pLI)`
-- Higher burden + higher constraint + higher pLI = higher risk weight
-
-**Seizure Penetrance** (from literature, scaled by risk weight):
-- Base: SCN1A=80%, KCNQ2=70%, SCN2A=65%, SCN8A=60%, KCNT1=55%, DEPDC5=45%, GRIN2A=40%, GABRA1=35%, PCDH19=50%
-- Scaled: penetrance × (0.5 + risk_weight)
-
----
-
-## Outputs Generated
-
-After running the pipeline:
-
-| File | Description |
-|------|-------------|
-| `data/processed/genetic_vectors/genetic_training_cohort.csv` | 10000 synthetic patients (22-dim vectors) |
-| `models/xgboost_genetic/xgboost_genetic_model.pkl` | Trained XGBoost model |
-| `models/xgboost_genetic/xgboost_genetic_metrics.json` | Test metrics (AUC, recall, precision, etc.) |
-| `models/xgboost_genetic/cv_results.json` | 5-fold cross-validation results |
-| `models/xgboost_genetic/training_log.json` | Full training log |
-| `models/xgboost_genetic/plots/*.png` | 10 publication-quality plots |
-
----
-
-## Expected Improvements (v1 → v5)
-
-| Metric | v1 (Old) | v5 (Expected) | Change |
-|--------|----------|---------------|--------|
-| AUC | 0.739 | 0.78-0.82 | +4-8% |
-| Recall | 55.3% | 70-80% | +15-25% |
-| Precision | 86.7% | 70-80% | -7-17% (trade-off) |
-| F1 | 0.675 | 0.72-0.78 | +5-11% |
-| Feature importance | Trivial aggregates | Individual genes | Biological |
-| Class balance | 70% seizure | 1-3% seizure | Realistic |
-| Carrier frequency | 3-10% (hand-picked) | 0.01-0.12% (from ClinVar) | Realistic |
-| Interpretability | None | SHAP analysis | Added |
-
-**Note**: AUC may be lower than v1 because the task is now harder (realistic class imbalance, realistic carrier frequencies). This is expected and desirable — the model is learning real biology, not trivial patterns.
-
----
-
-### Phase 8: XGBoost Retraining Attempts (v5.1 → v6)
-
-#### v5.1: Real Population Genetics Training
-- Attempted to retrain XGBoost with realistic synthetic data
-- Results: AUC=0.55, AUC-PR=0.65, Recall=49.5%
-- Problem: Model could not learn useful patterns from realistic data
-
-#### v5.2: Increased Data + Enhanced Features
-- Generated 50,000 synthetic patients
-- Added 12 interaction features
-- Results: AUC=0.56, Recall=49.1%
-- Still poor — model learning noise, not signal
-
-#### v6: Trainability Adjustments
-- 15x carrier frequency scaling
-- Stronger interaction signals (5x boost)
-- Results: AUC=0.45 (WORSE than random)
-- **Conclusion**: Realistic data fundamentally incompatible with current approach
-
-### Phase 9: Fusion Layer Implementation
-
-#### Decision: Use Old Model as Feature Extractor
-- **OLD XGBoost model** (AUC=0.739) learned useful patterns despite unrealistic data
-- Feed its continuous risk scores (0.0-1.0) to the fusion layer
-- Do NOT retrain — the old model's probability output is sufficient
-
-#### Files Created/Modified:
-
-1. **`src/training/fusion.py`** — Complete fusion layer implementation
-   - `AttentionGateFusion`: α·P_eeg + (1-α)·P_genetic with learned per-patient weighting
-   - `EEGBranchWrapper`: Loads frozen BiLSTM, extracts 64-dim embeddings
-   - `GeneticBranchWrapper`: Loads frozen XGBoost, outputs risk scores
-   - `FusionTrainer`: Training loop with early stopping
-   - `FusionInference`: Real-time prediction interface
-
-2. **`scripts/train_fusion.py`** — Fusion training pipeline
-   - Loads frozen EEG + Genetic models
-   - Trains attention gate on validation data
-   - Generates 5 publication-quality plots
-   - Supports synthetic data for testing
-
-3. **`scripts/evaluate_fusion.py`** — End-to-end evaluation
-   - Compares Fusion vs EEG-only vs Genetic-only
-   - ROC, PR, calibration, attention distribution plots
-   - Detailed metrics (AUC, F1, Recall, Specificity, MCC)
-
----
-
-## Known Issues / TODO
-
-1. **CTGAN Quality**: KS pass rate was 0% in first run — need to check if feature reduction helped
-2. **Limited Real Data**: Only 279 EDF files (11 patients) — CTGAN needs more real data
-3. **Genetic Data Simulation**: CHB-MIT has no real genetic data — all profiles are simulated
-
----
-
-## Next Steps
-
-See **`tobedone.md`** for the complete roadmap.
-
-**Summary of Next Steps:**
-
-1. ~~Build Fusion Layer~~ — ✅ DONE
-2. ~~Modify EEG Branch~~ — ✅ DONE (added `get_embedding()` method)
-3. **Train Fusion** — Run `scripts/train_fusion.py` on cloud PC
-4. **End-to-End Evaluation** — Run `scripts/evaluate_fusion.py` on held-out test set
-5. **FastAPI Backend** — REST API for real-time predictions
-6. **React Dashboard** — Real-time clinical monitoring interface
-
-**Key Decision**: Use the old XGBoost model (AUC=0.739) as a **feature extractor**, not a classifier. Feed continuous risk scores (0.0-1.0) to the fusion layer.
+**What it's NOT good for**:
+- Fusion layer training (EEG distributions don't match real data)
+- Replacing real test set (76 EDF files in `all_patients_test.csv`)
 
 ---
 
@@ -497,18 +293,15 @@ See **`tobedone.md`** for the complete roadmap.
 
 | File | Purpose |
 |------|---------|
-| `src/training/fusion.py` | **NEW** — Fusion layer model, trainer, inference class |
-| `scripts/train_fusion.py` | **NEW** — Fusion training pipeline with plots |
-| `scripts/evaluate_fusion.py` | **NEW** — End-to-end evaluation with comparison plots |
-| `seizure_prediction/libModelLSTM.py` | **MODIFIED** — Added `get_embedding()` method for fusion |
-| `scripts/train_xgboost_genetic.py` | Comprehensive XGBoost training with SHAP + 10 plots |
-| `scripts/generate_synthetic_genetic_patients.py` | v6 with trainability adjustments |
-| `src/data_pipeline/genetic_feature_engineering.py` | v2 with 22-dim vectors + 7 pLI scores |
-| `data/raw/clinvar/epilepsy_variants.csv` | SOURCE — 13,331 pathogenic variants |
-| `data/raw/gnomad/pli_scores.csv` | SOURCE — pLI, o/e LoF scores |
-| `data/raw/gwas/epilepsy_snps.csv` | SOURCE — 15 GWAS SNPs |
+| `seizure_prediction/generate_ctgan_data.py` | CTGAN synthetic data generation (v3) |
+| `seizure_prediction/libDataIO.py` | EDF reading, annotation parsing |
+| `seizure_prediction/libModelLSTM.py` | BiLSTM+Attention model |
+| `src/data_pipeline/genetic_feature_engineering.py` | 16-dim vector construction |
+| `scripts/generate_synthetic_genetic_patients.py` | Synthetic genetic patient generation |
+| `data/raw/gnomad/pli_scores.csv` | pLI scores for 9 genes |
+| `data/raw/gwas/epilepsy_snps.csv` | GWAS SNP weights for PRS |
 | `configs/config.yaml` | All project configuration |
 
 ---
 
-*Last updated: June 2026 — Phase 9: Fusion Layer Implementation (Complete)*
+*Last updated: June 2026 — CTGAN v3 Complete (Validation Set Only)*
