@@ -155,17 +155,19 @@ def main():
     attention_weights = np.array(attention_list)
 
     # ---- Get EEG-only scores ----
-    eeg_scores_list = []
-    with torch.no_grad():
-        for eeg_emb, gen_score, _ in test_loader:
-            eeg_proj = model.eeg_projection(eeg_emb)
-            gen_proj = model.genetic_projection(gen_score)
-            combined = torch.cat([eeg_proj, gen_proj], dim=1)
-            alpha = model.attention(combined)
-            eeg_only = alpha.squeeze() * eeg_proj.mean(dim=1)
-            eeg_scores_list.extend(eeg_only.numpy().flatten())
+    # Reconstruct EEG risk scores by passing cached 512-dim embeddings
+    # through the EEG model's FC layer (same as original forward pass)
+    print("\n--- Computing EEG-only scores from BiLSTM FC layer ---")
+    eeg_model_path = 'seizure_prediction/SavedModels/EEGLSTM_CHB-MIT_all_patients_train_Epoch-15_TLoss-0.0501_VLoss-0.7880_20260605-152850.net'
+    eeg_ckpt = torch.load(eeg_model_path, map_location='cpu', weights_only=False)
+    fc_weight = eeg_ckpt['dctStateDict']['FCLayer.weight']  # (3, 512)
+    fc_bias = eeg_ckpt['dctStateDict']['FCLayer.bias']      # (3,)
 
-    eeg_scores = np.array(eeg_scores_list)
+    X_eeg_test_t = torch.FloatTensor(X_eeg_test)
+    with torch.no_grad():
+        logits = X_eeg_test_t @ fc_weight.T + fc_bias  # (n, 3)
+        probs = F.softmax(logits, dim=1)
+        eeg_scores = probs[:, 1].numpy()  # preictal probability (class 1)
 
     # ---- Get genetic-only scores ----
     genetic_scores_flat = X_gen_test.flatten()
@@ -264,13 +266,20 @@ def main():
 
     # 4. Attention distribution
     fig, ax = plt.subplots(figsize=(8, 5))
-    ax.hist(attention_weights, bins=50, color='#FF9800', alpha=0.7, edgecolor='black')
-    ax.axvline(attention_weights.mean(), color='red', linestyle='--', linewidth=2,
-               label=f'Mean={attention_weights.mean():.3f}')
-    ax.set_xlabel('Attention Weight (EEG)', fontsize=14)
-    ax.set_ylabel('Count', fontsize=14)
-    ax.set_title('Attention Weight Distribution', fontsize=16)
-    ax.legend(fontsize=12)
+    unique_vals = np.unique(attention_weights)
+    if len(unique_vals) <= 1:
+        ax.bar([unique_vals[0]], [len(attention_weights)], width=0.02, color='#FF9800', alpha=0.7, edgecolor='black')
+        ax.set_xlabel('Attention Weight (EEG)', fontsize=14)
+        ax.set_ylabel('Count', fontsize=14)
+        ax.set_title(f'Attention Weight Distribution (constant={unique_vals[0]:.4f})', fontsize=16)
+    else:
+        ax.hist(attention_weights, bins=min(50, len(unique_vals)), color='#FF9800', alpha=0.7, edgecolor='black')
+        ax.axvline(attention_weights.mean(), color='red', linestyle='--', linewidth=2,
+                   label=f'Mean={attention_weights.mean():.3f}')
+        ax.set_xlabel('Attention Weight (EEG)', fontsize=14)
+        ax.set_ylabel('Count', fontsize=14)
+        ax.set_title('Attention Weight Distribution', fontsize=16)
+        ax.legend(fontsize=12)
     ax.grid(True, alpha=0.3)
     plt.tight_layout()
     plt.savefig(PLOTS_DIR / 'attention_distribution.png', dpi=150, bbox_inches='tight')
