@@ -281,10 +281,17 @@ def main():
     
     cache = np.load(CACHE_FILE)
     eeg_embeddings = cache['embeddings']
-    eeg_labels = cache['labels'].astype(np.float32)
-    
+    eeg_labels_raw = cache['labels']
+
+    # CHBMITDataset returns 3-class labels: 0=interictal, 1=preictal, 2=ictal
+    # Binarize: 0 → 0 (healthy), 1 or 2 → 1 (seizure risk)
+    eeg_labels = (eeg_labels_raw > 0).astype(np.float32)
+
+    n_preictal = int((eeg_labels_raw == 1).sum())
+    n_ictal = int((eeg_labels_raw == 2).sum())
     print(f"  Loaded: {eeg_embeddings.shape} embeddings")
-    print(f"  Labels: {eeg_labels.shape} ({eeg_labels.sum()} positive)")
+    print(f"  Labels: {eeg_labels.shape} ({int(eeg_labels.sum())} positive)")
+    print(f"    Preictal (1): {n_preictal}  |  Ictal (2): {n_ictal}  |  Interictal (0): {int(len(eeg_labels) - n_preictal - n_ictal)}")
     
     # ---- Step 2: Load genetic data and compute scores ----
     print(f"\n--- Step 2: Loading Genetic Data ---")
