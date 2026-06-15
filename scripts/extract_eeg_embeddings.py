@@ -15,6 +15,7 @@ from pathlib import Path
 
 import numpy as np
 import torch
+import torch.nn.functional as F
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
@@ -29,6 +30,29 @@ CSV_TRAIN = 'seizure_prediction/DataCSVs/CHB-MIT/all_patients_train.csv'
 CSV_TEST = 'seizure_prediction/DataCSVs/CHB-MIT/all_patients_test.csv'
 OUTPUT_DIR = Path('models/fusion')
 CACHE_FILE = OUTPUT_DIR / 'eeg_embeddings.npz'
+
+TARGET_SEQ_LEN = 1280  # 5 seconds at 256 Hz (model's expected input)
+
+
+def collate_fn(batch):
+    """Pad/truncate all windows to fixed length and stack."""
+    eeg_windows, labels = zip(*batch)
+    
+    # Pad or truncate each window to TARGET_SEQ_LEN
+    padded = []
+    for w in eeg_windows:
+        w = torch.as_tensor(w, dtype=torch.float32)
+        if w.shape[0] > TARGET_SEQ_LEN:
+            w = w[:TARGET_SEQ_LEN]
+        elif w.shape[0] < TARGET_SEQ_LEN:
+            pad = torch.zeros(TARGET_SEQ_LEN - w.shape[0], w.shape[1])
+            w = torch.cat([w, pad], dim=0)
+        padded.append(w)
+    
+    eeg_batch = torch.stack(padded, dim=0)
+    label_batch = torch.tensor(labels, dtype=torch.float32)
+    
+    return eeg_batch, label_batch
 
 
 def load_eeg_model():
@@ -57,7 +81,9 @@ def extract_embeddings(model, dataset, batch_size=16):
     all_embeddings = []
     all_labels = []
     
-    dataloader = torch.utils.data.DataLoader(dataset, batch_size=batch_size, shuffle=False)
+    dataloader = torch.utils.data.DataLoader(
+        dataset, batch_size=batch_size, shuffle=False, collate_fn=collate_fn
+    )
     
     start_time = time.time()
     with torch.no_grad():
