@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
 """
-Fusion Model Evaluation
-=======================
-Loads the same data as train_fusion_clean.py, reproduces the split,
-loads the trained fusion model, and compares Fusion vs EEG-only vs Genetic-only.
+Fusion Evaluation: EEG-only vs EEG+Genetic Fusion
+===================================================
+Compares the trained BiLSTM (EEG-only) against the fusion model
+to answer: does adding genetic data help?
 
-Usage:
-    python scripts/evaluate_fusion.py
+EEG-only score: BiLSTM FC layer → softmax → preictal probability
+Fusion score:   Fusion model → attention-gated risk score
 """
 
 import sys
@@ -43,16 +43,16 @@ CACHE_FILE = OUTPUT_DIR / 'eeg_embeddings.npz'
 PLOTS_DIR = OUTPUT_DIR / 'plots'
 SEED = 42
 
+EEG_MODEL_PATH = 'seizure_prediction/SavedModels/EEGLSTM_CHB-MIT_all_patients_train_Epoch-15_TLoss-0.0501_VLoss-0.7880_20260605-152850.net'
+
 
 def load_data():
-    """Reproduce the exact same data pipeline as training."""
-    # 1. Load EEG embeddings
+    """Load EEG embeddings, compute genetic scores, produce train/test split."""
     cache = np.load(CACHE_FILE)
     eeg_embeddings = cache['embeddings']
     eeg_labels_raw = cache['labels']
     eeg_labels = (eeg_labels_raw > 0).astype(np.float32)
 
-    # 2. Load genetic data and compute risk scores
     genetic_csv = 'data/processed/genetic_vectors/genetic_training_cohort.csv'
     xgb_path = 'models/xgboost_genetic/xgboost_genetic_model.pkl'
 
@@ -64,14 +64,11 @@ def load_data():
     xgb_model.load_model(xgb_path)
     genetic_risk_scores = xgb_model.predict_proba(genetic_features)[:, 1]
 
-    # 3. Align genetic scores to EEG windows
     rng = np.random.RandomState(SEED)
-    unique_labels = np.unique(eeg_labels_raw)
-    patient_scores = rng.choice(genetic_risk_scores, size=len(unique_labels), replace=True)
-    label_to_score = dict(zip(unique_labels, patient_scores))
-    genetic_scores_aligned = np.array([label_to_score[l] for l in eeg_labels_raw]).reshape(-1, 1)
+    genetic_scores_aligned = rng.choice(
+        genetic_risk_scores, size=len(eeg_labels_raw), replace=True
+    ).reshape(-1, 1)
 
-    # 4. Reproduce exact same split
     X_eeg_temp, X_eeg_test, X_gen_temp, X_gen_test, y_temp, y_test = train_test_split(
         eeg_embeddings, genetic_scores_aligned, eeg_labels,
         test_size=0.2, stratify=eeg_labels, random_state=SEED
@@ -81,41 +78,54 @@ def load_data():
         test_size=0.25, stratify=y_temp, random_state=SEED
     )
 
-    return X_eeg_test, X_gen_test, y_test, eeg_embeddings, genetic_scores_aligned, eeg_labels
+    return X_eeg_test, X_gen_test, y_test
 
 
-def load_fusion_model():
-    """Load trained fusion model."""
+def compute_eeg_only_scores(X_eeg_test):
+    """Get preictal probabilities from the BiLSTM's own FC layer."""
+    ckpt = torch.load(EEG_MODEL_PATH, map_location='cpu', weights_only=False)
+    fc_w = ckpt['dctStateDict']['FCLayer.weight']  # (3, 512)
+    fc_b = ckpt['dctStateDict']['FCLayer.bias']    # (3,)
+    with torch.no_grad():
+        logits = torch.FloatTensor(X_eeg_test) @ fc_w.T + fc_b
+        probs = F.softmax(logits, dim=1)
+    return probs[:, 1].numpy()
+
+
+def compute_fusion_scores(X_eeg_test, X_gen_test):
+    """Get fused risk scores from the trained fusion model."""
     model = AttentionGateFusion(eeg_embedding_dim=512, genetic_dim=1, hidden_dim=128, dropout=0.3)
     model.load_state_dict(torch.load(OUTPUT_DIR / 'fusion_best.pt', map_location='cpu', weights_only=False))
     model.eval()
-    return model
+    dataset = FusionDataset(X_eeg_test, X_gen_test, np.zeros(len(X_eeg_test)))
+    loader = DataLoader(dataset, batch_size=64, shuffle=False)
+    scores, alphas = [], []
+    with torch.no_grad():
+        for eeg_emb, gen_score, _ in loader:
+            risk, alpha = model(eeg_emb, gen_score)
+            scores.extend(risk.numpy().flatten())
+            alphas.extend(alpha.numpy().flatten())
+    return np.array(scores), np.array(alphas)
 
 
-def evaluate_branch(y_true, scores, name):
-    """Compute metrics for one model."""
-    auc = roc_auc_score(y_true, scores)
-    ap = average_precision_score(y_true, scores)
-
-    precisions, recalls, thresholds = precision_recall_curve(y_true, scores)
+def compute_metrics(y_true, y_prob, name):
+    """Compute all metrics for a model."""
+    auc = roc_auc_score(y_true, y_prob)
+    ap = average_precision_score(y_true, y_prob)
+    precisions, recalls, thresholds = precision_recall_curve(y_true, y_prob)
     f1s = 2 * (precisions * recalls) / (precisions + recalls + 1e-8)
     best_idx = np.argmax(f1s[:-1])
-    opt_threshold = thresholds[best_idx]
-
-    y_pred = (scores >= opt_threshold).astype(int)
+    opt_thr = thresholds[best_idx]
+    y_pred = (y_prob >= opt_thr).astype(int)
     tn, fp, fn, tp = confusion_matrix(y_true, y_pred).ravel()
-
     return {
-        'branch': name,
-        'auc': float(auc),
-        'aucpr': float(ap),
-        'threshold': float(opt_threshold),
-        'accuracy': float(accuracy_score(y_true, y_pred)),
-        'precision': float(precision_score(y_true, y_pred, zero_division=0)),
-        'recall': float(recall_score(y_true, y_pred, zero_division=0)),
-        'f1': float(f1_score(y_true, y_pred, zero_division=0)),
-        'specificity': float(tn / (tn + fp) if (tn + fp) > 0 else 0),
-        'mcc': float(matthews_corrcoef(y_true, y_pred)),
+        'name': name, 'auc': auc, 'aucpr': ap, 'threshold': opt_thr,
+        'accuracy': accuracy_score(y_true, y_pred),
+        'precision': precision_score(y_true, y_pred, zero_division=0),
+        'recall': recall_score(y_true, y_pred, zero_division=0),
+        'f1': f1_score(y_true, y_pred, zero_division=0),
+        'specificity': tn / (tn + fp) if (tn + fp) > 0 else 0,
+        'mcc': matthews_corrcoef(y_true, y_pred),
         'tn': int(tn), 'fp': int(fp), 'fn': int(fn), 'tp': int(tp),
     }
 
@@ -124,207 +134,156 @@ def main():
     PLOTS_DIR.mkdir(parents=True, exist_ok=True)
 
     print("=" * 70)
-    print("Fusion Model Evaluation")
+    print("Fusion Evaluation: EEG-only vs EEG+Genetic Fusion")
     print("=" * 70)
 
-    # ---- Load data ----
-    print("\n--- Loading Data ---")
-    X_eeg_test, X_gen_test, y_test, all_eeg, all_gen, all_labels = load_data()
-    print(f"  Test samples: {len(y_test)}")
-    print(f"  Test positive: {int(y_test.sum())} ({y_test.mean()*100:.1f}%)")
+    X_eeg_test, X_gen_test, y_test = load_data()
+    print(f"  Test: {len(y_test)} windows, {int(y_test.sum())} seizure ({y_test.mean()*100:.1f}%)")
 
-    # ---- Load model ----
-    print("\n--- Loading Fusion Model ---")
-    model = load_fusion_model()
-    print(f"  Model loaded from {OUTPUT_DIR / 'fusion_best.pt'}")
+    eeg_scores = compute_eeg_only_scores(X_eeg_test)
+    fusion_scores, attention_weights = compute_fusion_scores(X_eeg_test, X_gen_test)
 
-    # ---- Get fusion predictions ----
-    test_dataset = FusionDataset(X_eeg_test, X_gen_test, y_test)
-    test_loader = DataLoader(test_dataset, batch_size=64, shuffle=False)
+    eeg_m = compute_metrics(y_test, eeg_scores, 'EEG-only')
+    fuse_m = compute_metrics(y_test, fusion_scores, 'Fusion')
 
-    fused_scores_list = []
-    attention_list = []
+    print(f"\n  {'':20s} {'AUC':>8s} {'AUC-PR':>8s} {'F1':>8s} {'Precision':>10s} {'Recall':>8s} {'MCC':>8s}")
+    print(f"  {'-'*74}")
+    for m in [eeg_m, fuse_m]:
+        print(f"  {m['name']:20s} {m['auc']:>8.4f} {m['aucpr']:>8.4f} {m['f1']:>8.4f} "
+              f"{m['precision']:>10.4f} {m['recall']:>8.4f} {m['mcc']:>8.4f}")
 
-    with torch.no_grad():
-        for eeg_emb, gen_score, _ in test_loader:
-            risk, alpha = model(eeg_emb, gen_score)
-            fused_scores_list.extend(risk.numpy().flatten())
-            attention_list.extend(alpha.numpy().flatten())
+    print(f"\n  Fusion improvement over EEG-only:")
+    print(f"    AUC:      {fuse_m['auc'] - eeg_m['auc']:+.4f}")
+    print(f"    AUC-PR:   {fuse_m['aucpr'] - eeg_m['aucpr']:+.4f}")
+    print(f"    F1:       {fuse_m['f1'] - eeg_m['f1']:+.4f}")
+    print(f"    Recall:   {fuse_m['recall'] - eeg_m['recall']:+.4f}")
+    print(f"    MCC:      {fuse_m['mcc'] - eeg_m['mcc']:+.4f}")
 
-    fused_scores = np.array(fused_scores_list)
-    attention_weights = np.array(attention_list)
-
-    # ---- Get EEG-only scores ----
-    # Reconstruct EEG risk scores by passing cached 512-dim embeddings
-    # through the EEG model's FC layer (same as original forward pass)
-    print("\n--- Computing EEG-only scores from BiLSTM FC layer ---")
-    eeg_model_path = 'seizure_prediction/SavedModels/EEGLSTM_CHB-MIT_all_patients_train_Epoch-15_TLoss-0.0501_VLoss-0.7880_20260605-152850.net'
-    eeg_ckpt = torch.load(eeg_model_path, map_location='cpu', weights_only=False)
-    fc_weight = eeg_ckpt['dctStateDict']['FCLayer.weight']  # (3, 512)
-    fc_bias = eeg_ckpt['dctStateDict']['FCLayer.bias']      # (3,)
-
-    X_eeg_test_t = torch.FloatTensor(X_eeg_test)
-    with torch.no_grad():
-        logits = X_eeg_test_t @ fc_weight.T + fc_bias  # (n, 3)
-        probs = F.softmax(logits, dim=1)
-        eeg_scores = probs[:, 1].numpy()  # preictal probability (class 1)
-
-    # ---- Get genetic-only scores ----
-    genetic_scores_flat = X_gen_test.flatten()
-
-    # ---- Evaluate ----
-    print("\n--- Branch Evaluation ---")
-    eeg_m = evaluate_branch(y_test, eeg_scores, 'EEG-only')
-    gen_m = evaluate_branch(y_test, genetic_scores_flat, 'Genetic-only')
-    fuse_m = evaluate_branch(y_test, fused_scores, 'Fusion')
-    all_m = [eeg_m, gen_m, fuse_m]
-
-    for m in all_m:
-        print(f"\n  {m['branch']}:")
-        print(f"    AUC:         {m['auc']:.4f}")
-        print(f"    AUC-PR:      {m['aucpr']:.4f}")
-        print(f"    F1:          {m['f1']:.4f}")
-        print(f"    Precision:   {m['precision']:.4f}")
-        print(f"    Recall:      {m['recall']:.4f}")
-        print(f"    Specificity: {m['specificity']:.4f}")
-        print(f"    MCC:         {m['mcc']:.4f}")
-
-    # ---- Improvement ----
-    print("\n--- Improvement Analysis ---")
-    print(f"  Fusion vs EEG-only:   AUC {fuse_m['auc'] - eeg_m['auc']:+.4f}  F1 {fuse_m['f1'] - eeg_m['f1']:+.4f}")
-    print(f"  Fusion vs Genetic:    AUC {fuse_m['auc'] - gen_m['auc']:+.4f}  F1 {fuse_m['f1'] - gen_m['f1']:+.4f}")
-
-    # ---- Attention analysis ----
-    print("\n--- Attention Analysis ---")
-    print(f"  Mean EEG attention:     {attention_weights.mean():.3f}")
-    print(f"  Mean Genetic attention: {1 - attention_weights.mean():.3f}")
-    print(f"  Std attention:          {attention_weights.std():.3f}")
-    if y_test.sum() > 0:
-        print(f"  Attention (seizure):    {attention_weights[y_test == 1].mean():.3f}")
-    print(f"  Attention (non-seizure):{attention_weights[y_test == 0].mean():.3f}")
+    print(f"\n  Attention: mean={attention_weights.mean():.3f}, std={attention_weights.std():.4f}")
 
     # ==================== PLOTS ====================
     print("\n--- Generating Plots ---")
-    scores_dict = {'EEG-only': eeg_scores, 'Genetic-only': genetic_scores_flat, 'Fusion': fused_scores}
-    colors = {'EEG-only': '#2196F3', 'Genetic-only': '#4CAF50', 'Fusion': '#FF9800'}
+    blue, orange = '#2196F3', '#FF9800'
 
-    # 1. ROC comparison
+    # 1. ROC
     fig, ax = plt.subplots(figsize=(8, 6))
-    for name, sc in scores_dict.items():
-        fpr, tpr, _ = roc_curve(y_test, sc)
-        ax.plot(fpr, tpr, color=colors[name], linewidth=2,
-                label=f'{name} (AUC={roc_auc_score(y_test, sc):.3f})')
-    ax.plot([0, 1], [0, 1], 'k--', linewidth=1, alpha=0.5)
+    for m, color, ls in [(eeg_m, blue, '-'), (fuse_m, orange, '-')]:
+        fpr, tpr, _ = roc_curve(y_test, [eeg_scores, fusion_scores][0 if m['name'] == 'EEG-only' else 1])
+        ax.plot(fpr, tpr, color=color, linewidth=2.5, linestyle=ls,
+                label=f'{m["name"]} (AUC={m["auc"]:.3f})')
+    ax.plot([0, 1], [0, 1], 'k--', linewidth=1, alpha=0.4)
     ax.set_xlabel('False Positive Rate', fontsize=14)
     ax.set_ylabel('True Positive Rate', fontsize=14)
-    ax.set_title('ROC Curve Comparison', fontsize=16)
-    ax.legend(fontsize=12)
+    ax.set_title('ROC Curve: EEG-only vs Fusion', fontsize=16)
+    ax.legend(fontsize=13, loc='lower right')
     ax.grid(True, alpha=0.3)
+    ax.set_xlim([0, 1]); ax.set_ylim([0, 1.02])
     plt.tight_layout()
-    plt.savefig(PLOTS_DIR / 'roc_comparison.png', dpi=150, bbox_inches='tight')
+    plt.savefig(PLOTS_DIR / 'roc_eeg_vs_fusion.png', dpi=150, bbox_inches='tight')
     plt.close()
-    print(f"  Saved: roc_comparison.png")
+    print("  Saved: roc_eeg_vs_fusion.png")
 
-    # 2. PR comparison
+    # 2. PR
     fig, ax = plt.subplots(figsize=(8, 6))
-    for name, sc in scores_dict.items():
+    for sc, name, color in [(eeg_scores, 'EEG-only', blue), (fusion_scores, 'Fusion', orange)]:
         prec, rec, _ = precision_recall_curve(y_test, sc)
-        ax.plot(rec, prec, color=colors[name], linewidth=2,
-                label=f'{name} (AP={average_precision_score(y_test, sc):.3f})')
+        ap = average_precision_score(y_test, sc)
+        ax.plot(rec, prec, color=color, linewidth=2.5, label=f'{name} (AP={ap:.3f})')
+    baseline = y_test.mean()
+    ax.axhline(baseline, color='gray', linestyle='--', linewidth=1, alpha=0.5, label=f'Baseline ({baseline:.3f})')
     ax.set_xlabel('Recall', fontsize=14)
     ax.set_ylabel('Precision', fontsize=14)
-    ax.set_title('Precision-Recall Curve Comparison', fontsize=16)
-    ax.legend(fontsize=12)
+    ax.set_title('Precision-Recall: EEG-only vs Fusion', fontsize=16)
+    ax.legend(fontsize=13)
     ax.grid(True, alpha=0.3)
+    ax.set_xlim([0, 1]); ax.set_ylim([0, 1.02])
     plt.tight_layout()
-    plt.savefig(PLOTS_DIR / 'pr_comparison.png', dpi=150, bbox_inches='tight')
+    plt.savefig(PLOTS_DIR / 'pr_eeg_vs_fusion.png', dpi=150, bbox_inches='tight')
     plt.close()
-    print(f"  Saved: pr_comparison.png")
+    print("  Saved: pr_eeg_vs_fusion.png")
 
-    # 3. Bar chart comparison
+    # 3. Side-by-side metric bars
     fig, ax = plt.subplots(figsize=(10, 6))
-    branches = [m['branch'] for m in all_m]
-    metrics_to_plot = ['auc', 'f1', 'recall', 'specificity']
-    x = np.arange(len(branches))
-    width = 0.2
-    bar_colors = ['#2196F3', '#4CAF50', '#FF9800', '#9C27B0']
-    for i, metric in enumerate(metrics_to_plot):
-        values = [m[metric] for m in all_m]
-        ax.bar(x + i * width, values, width, label=metric.upper(), color=bar_colors[i], alpha=0.8)
-    ax.set_xlabel('Model', fontsize=14)
+    metric_names = ['AUC', 'AUC-PR', 'F1', 'Precision', 'Recall', 'Specificity', 'MCC']
+    eeg_vals = [eeg_m['auc'], eeg_m['aucpr'], eeg_m['f1'], eeg_m['precision'],
+                eeg_m['recall'], eeg_m['specificity'], eeg_m['mcc']]
+    fuse_vals = [fuse_m['auc'], fuse_m['aucpr'], fuse_m['f1'], fuse_m['precision'],
+                 fuse_m['recall'], fuse_m['specificity'], fuse_m['mcc']]
+    x = np.arange(len(metric_names))
+    width = 0.35
+    ax.bar(x - width/2, eeg_vals, width, label='EEG-only', color=blue, alpha=0.85)
+    ax.bar(x + width/2, fuse_vals, width, label='Fusion', color=orange, alpha=0.85)
     ax.set_ylabel('Score', fontsize=14)
-    ax.set_title('Performance Comparison', fontsize=16)
-    ax.set_xticks(x + width * 1.5)
-    ax.set_xticklabels(branches, fontsize=12)
-    ax.legend(fontsize=12)
-    ax.set_ylim([0, 1.05])
+    ax.set_title('EEG-only vs Fusion: All Metrics', fontsize=16)
+    ax.set_xticks(x)
+    ax.set_xticklabels(metric_names, fontsize=12)
+    ax.legend(fontsize=13)
+    ax.set_ylim([0, 1.1])
     ax.grid(True, alpha=0.3, axis='y')
+    for i, (ev, fv) in enumerate(zip(eeg_vals, fuse_vals)):
+        diff = fv - ev
+        color = 'green' if diff > 0 else 'red'
+        ax.annotate(f'{diff:+.3f}', xy=(i + width/2, fv), fontsize=8, color=color,
+                    ha='center', va='bottom', fontweight='bold')
     plt.tight_layout()
-    plt.savefig(PLOTS_DIR / 'improvement_comparison.png', dpi=150, bbox_inches='tight')
+    plt.savefig(PLOTS_DIR / 'metrics_comparison.png', dpi=150, bbox_inches='tight')
     plt.close()
-    print(f"  Saved: improvement_comparison.png")
+    print("  Saved: metrics_comparison.png")
 
-    # 4. Attention distribution
-    fig, ax = plt.subplots(figsize=(8, 5))
-    unique_vals = np.unique(attention_weights)
-    if len(unique_vals) <= 1:
-        ax.bar([unique_vals[0]], [len(attention_weights)], width=0.02, color='#FF9800', alpha=0.7, edgecolor='black')
-        ax.set_xlabel('Attention Weight (EEG)', fontsize=14)
-        ax.set_ylabel('Count', fontsize=14)
-        ax.set_title(f'Attention Weight Distribution (constant={unique_vals[0]:.4f})', fontsize=16)
-    else:
-        ax.hist(attention_weights, bins=min(50, len(unique_vals)), color='#FF9800', alpha=0.7, edgecolor='black')
-        ax.axvline(attention_weights.mean(), color='red', linestyle='--', linewidth=2,
-                   label=f'Mean={attention_weights.mean():.3f}')
-        ax.set_xlabel('Attention Weight (EEG)', fontsize=14)
-        ax.set_ylabel('Count', fontsize=14)
-        ax.set_title('Attention Weight Distribution', fontsize=16)
-        ax.legend(fontsize=12)
-    ax.grid(True, alpha=0.3)
+    # 4. Confusion matrices side by side
+    fig, axes = plt.subplots(1, 2, figsize=(12, 5))
+    for ax, scores, name, thr in [(axes[0], eeg_scores, 'EEG-only', eeg_m['threshold']),
+                                   (axes[1], fusion_scores, 'Fusion', fuse_m['threshold'])]:
+        y_pred = (scores >= thr).astype(int)
+        cm = confusion_matrix(y_test, y_pred)
+        sns.heatmap(cm, annot=True, fmt='d', cmap='Blues', ax=ax,
+                    xticklabels=['Non-seizure', 'Seizure'],
+                    yticklabels=['Non-seizure', 'Seizure'])
+        ax.set_xlabel('Predicted', fontsize=13)
+        ax.set_ylabel('Actual', fontsize=13)
+        ax.set_title(f'{name}\n(thr={thr:.3f})', fontsize=14)
+    plt.suptitle('Confusion Matrices', fontsize=16, y=1.02)
     plt.tight_layout()
-    plt.savefig(PLOTS_DIR / 'attention_distribution.png', dpi=150, bbox_inches='tight')
+    plt.savefig(PLOTS_DIR / 'confusion_matrices.png', dpi=150, bbox_inches='tight')
     plt.close()
-    print(f"  Saved: attention_distribution.png")
+    print("  Saved: confusion_matrices.png")
 
-    # 5. Confusion matrix
-    y_pred = (fused_scores >= fuse_m['threshold']).astype(int)
-    cm = confusion_matrix(y_test, y_pred)
-    fig, ax = plt.subplots(figsize=(6, 5))
-    sns.heatmap(cm, annot=True, fmt='d', cmap='Blues', ax=ax,
-                xticklabels=['Non-seizure', 'Seizure'],
-                yticklabels=['Non-seizure', 'Seizure'])
-    ax.set_xlabel('Predicted', fontsize=14)
-    ax.set_ylabel('Actual', fontsize=14)
-    ax.set_title('Confusion Matrix (Fusion)', fontsize=16)
+    # 5. Prediction distributions
+    fig, axes = plt.subplots(1, 2, figsize=(14, 5))
+    for ax, scores, name, color in [(axes[0], eeg_scores, 'EEG-only', blue),
+                                     (axes[1], fusion_scores, 'Fusion', orange)]:
+        ax.hist(scores[y_test == 0], bins=50, alpha=0.6, color='steelblue', label='Non-seizure', density=True)
+        ax.hist(scores[y_test == 1], bins=50, alpha=0.6, color='crimson', label='Seizure', density=True)
+        ax.set_xlabel('Predicted Score', fontsize=13)
+        ax.set_ylabel('Density', fontsize=13)
+        ax.set_title(f'{name} Score Distribution', fontsize=14)
+        ax.legend(fontsize=11)
+        ax.grid(True, alpha=0.3)
     plt.tight_layout()
-    plt.savefig(PLOTS_DIR / 'confusion_matrix.png', dpi=150, bbox_inches='tight')
+    plt.savefig(PLOTS_DIR / 'score_distributions.png', dpi=150, bbox_inches='tight')
     plt.close()
-    print(f"  Saved: confusion_matrix.png")
+    print("  Saved: score_distributions.png")
 
     # ---- Save JSON ----
     results = {
         'test_samples': len(y_test),
         'positive_samples': int(y_test.sum()),
-        'positive_rate': float(y_test.mean()),
-        'metrics': {m['branch']: m for m in all_m},
-        'attention': {
-            'mean_eeg': float(attention_weights.mean()),
-            'mean_genetic': float(1 - attention_weights.mean()),
-            'std': float(attention_weights.std()),
+        'eeg_only': eeg_m, 'fusion': fuse_m,
+        'improvement': {
+            'auc': fuse_m['auc'] - eeg_m['auc'],
+            'aucpr': fuse_m['aucpr'] - eeg_m['aucpr'],
+            'f1': fuse_m['f1'] - eeg_m['f1'],
+            'recall': fuse_m['recall'] - eeg_m['recall'],
+            'mcc': fuse_m['mcc'] - eeg_m['mcc'],
         },
+        'attention': {'mean': float(attention_weights.mean()), 'std': float(attention_weights.std())},
     }
     with open(OUTPUT_DIR / 'fusion_evaluation.json', 'w') as f:
-        json.dump(results, f, indent=2)
+        json.dump(results, f, indent=2, default=float)
 
-    # ---- Summary ----
     print("\n" + "=" * 70)
-    print("EVALUATION COMPLETE")
+    print("COMPLETE")
     print("=" * 70)
-    print(f"\n  {'Model':<20s} {'AUC':>8s} {'AUC-PR':>8s} {'F1':>8s} {'Recall':>8s}")
-    print(f"  {'-'*56}")
-    for m in all_m:
-        print(f"  {m['branch']:<20s} {m['auc']:>8.4f} {m['aucpr']:>8.4f} {m['f1']:>8.4f} {m['recall']:>8.4f}")
-    print(f"\n  All plots saved to: {PLOTS_DIR}")
 
 
 if __name__ == '__main__':

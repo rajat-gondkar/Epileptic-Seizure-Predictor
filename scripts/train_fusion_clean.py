@@ -87,35 +87,26 @@ def align_genetic_to_eeg(eeg_labels, genetic_risk_scores, seed=42):
     Align genetic risk scores to EEG windows.
     
     Since genetic data (10K synthetic patients) doesn't map to
-    CHB-MIT patients (11 real patients), we assign each CHB-MIT
-    patient a genetic risk score sampled from the real distribution.
+    CHB-MIT patients (11 real patients), we assign each EEG window
+    a genetic risk score sampled randomly from the XGBoost distribution.
     
-    Each EEG window gets the risk score of its patient.
+    Scores are assigned per-window (NOT per-label) to avoid leaking
+    label information through the genetic channel.
     """
     rng = np.random.RandomState(seed)
     
-    # Get unique patients from EEG labels
-    unique_patients = np.unique(eeg_labels)
-    n_patients = len(unique_patients)
-    
-    print(f"\n  Aligning {n_patients} CHB-MIT patients to genetic risk scores")
+    print(f"\n  Aligning {len(eeg_labels)} EEG windows to genetic risk scores")
     print(f"    Genetic distribution: mean={genetic_risk_scores.mean():.3f}, "
           f"std={genetic_risk_scores.std():.3f}")
     
-    # Sample risk scores from the genetic distribution for each patient
-    # Use stratified sampling to preserve the distribution shape
-    patient_risk_scores = rng.choice(
-        genetic_risk_scores.flatten(), size=n_patients, replace=True
-    )
-    
-    # Create patient -> risk score mapping
-    patient_to_risk = dict(zip(unique_patients, patient_risk_scores))
-    
-    # Assign risk scores to each EEG window
-    eeg_genetic_scores = np.array([patient_to_risk[p] for p in eeg_labels]).reshape(-1, 1)
+    # Assign a random genetic risk score to each window independently
+    eeg_genetic_scores = rng.choice(
+        genetic_risk_scores.flatten(), size=len(eeg_labels), replace=True
+    ).reshape(-1, 1)
     
     print(f"    Assigned risk scores to {len(eeg_genetic_scores)} windows")
     print(f"    Assigned range: [{eeg_genetic_scores.min():.3f}, {eeg_genetic_scores.max():.3f}]")
+    print(f"    NOTE: Genetic scores are random per-window (no label leakage)")
     
     return eeg_genetic_scores
 
