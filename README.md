@@ -3,24 +3,31 @@
 <p align="center">
   <img src="https://img.shields.io/badge/Python-3.12-blue?logo=python" />
   <img src="https://img.shields.io/badge/PyTorch-2.0%2B-orange?logo=pytorch" />
-  <img src="https://img.shields.io/badge/MNE--Python-1.12-green" />
   <img src="https://img.shields.io/badge/XGBoost-1.7%2B-brightgreen" />
-  <img src="https://img.shields.io/badge/Status-In%20Development-yellow" />
+  <img src="https://img.shields.io/badge/React-18-61dafb?logo=react" />
+  <img src="https://img.shields.io/badge/Models-Trained%20%26%20Evaluated-success" />
 </p>
 
-A multimodal AI system that fuses **real-time EEG signals** with **patient-specific genetic biomarkers** to deliver personalised, early epileptic seizure prediction.
+A multimodal AI system that fuses **EEG signals** with **patient-specific genetic biomarkers** through a learned attention gate to deliver personalised epileptic seizure prediction.
+
+**Project:** RVCE Innovative Design Project (IDP)
+**Team:** Rajat G A · Srijeeta Ghosh · Aamir Ibrahim · Misab Abdul Raheem
+**Guide:** Prof. Deepika P
+
+> For the full technical specification (every hyperparameter, dataset table, and result), see **[`TECHNICAL_REFERENCE.md`](./TECHNICAL_REFERENCE.md)**.
 
 ---
 
 ## Overview
 
-Epilepsy affects ~50 million people worldwide. Existing seizure prediction systems treat all patients identically, ignoring the significant genetic variability in epilepsy aetiology. This project addresses that gap by:
+Epilepsy affects ~50 million people worldwide, yet most seizure-prediction systems treat all patients identically and ignore the genetic variability in epilepsy aetiology. This project addresses that gap with a **late-fusion multimodal architecture**:
 
-1. **EEG Branch** — A Bidirectional LSTM with self-attention trained on the CHB-MIT scalp EEG database (256 Hz, 5-second sliding windows, 30-minute preictal horizon)
-2. **Genetic Branch** — An XGBoost classifier on a 12-dimensional genetic vector: 9 gene mutation flags (SCN1A, SCN8A, KCNQ2, SCN2A, KCNT1, DEPDC5, PCDH19, GRIN2A, GABRA1), 2 gnomAD pLI scores, and a Polygenic Risk Score from 15 GWAS SNPs
-3. **Fusion Layer** — An attention-gated late fusion that dynamically weights both branches per patient to produce a final risk score
-4. **Synthetic Data** — CTGAN to augment the paired EEG-genetic training set with population-constraint awareness
-5. **Clinical Dashboard** — React.js frontend with a 4-level real-time alert engine
+1. **EEG Branch** — A Bidirectional LSTM with attention trained on the CHB-MIT scalp EEG database. It operates on raw preprocessed 30-second windows (no hand-crafted feature extraction) and learns temporal patterns directly. Produces a 512-dim embedding plus a 3-class prediction (interictal / preictal / ictal).
+2. **Genetic Branch** — An XGBoost classifier on a **22-dimensional** genetic feature vector: 9 weighted gene-mutation flags, 7 gnomAD pLI scores, a Polygenic Risk Score from 15 GWAS SNPs, and 5 engineered interaction/burden features.
+3. **Fusion Layer** — An attention-gated late fusion that learns a per-patient weight α blending the EEG embedding with the genetic risk score into a final risk `P_final ∈ [0,1]`.
+4. **Synthetic Data (CTGAN)** — Generates a constrained synthetic cohort, used strictly as a **validation benchmark** (not as fusion training data).
+5. **Clinical Alert** — `P_final` maps to a 4-level alert system (Low / Moderate / High / Critical).
+6. **Showcase Dashboard** — A reactive React + Vite dashboard that visualises the entire pipeline and includes an interactive fusion simulator.
 
 ---
 
@@ -28,53 +35,51 @@ Epilepsy affects ~50 million people worldwide. Existing seizure prediction syste
 
 ```
                     ┌─────────────────────────┐
-                    │      Patient Input        │
-                    │   EEG + Genetic Profile   │
-                    └───────────┬─────────────┘
+                    │      Patient Input       │
+                    │   EEG + Genetic Profile  │
+                    └───────────┬──────────────┘
                                 │
-              ┌─────────────────┴─────────────────┐
-              ▼                                   ▼
-  ┌───────────────────────┐         ┌─────────────────────────┐
-  │     EEG Branch         │         │     Genetic Branch       │
-  │                        │         │                          │
-  │  Input: [B, 1280, 17]  │         │  Input: [B, 12]          │
-  │  BiLSTM (hidden=128×2) │         │  XGBoost (300 trees)     │
-  │  Self-Attention        │         │                          │
-  │  FC(256→64) + ReLU     │         │  Output: P_genetic       │
-  │  Output: P_eeg         │         └──────────┬──────────────┘
-  └───────────┬───────────┘                     │
-              │                                 │
-              └─────────────────┬───────────────┘
+              ┌─────────────────┴──────────────────┐
+              ▼                                     ▼
+  ┌───────────────────────────┐       ┌──────────────────────────┐
+  │       EEG Branch           │       │      Genetic Branch       │
+  │                            │       │                           │
+  │  Input: [B, 3840, 19]      │       │  Input: [B, 22]           │
+  │  BiLSTM (hidden=256, 2L)   │       │  XGBoost (300 trees,      │
+  │  + Attention over time     │       │           max_depth=3)    │
+  │  → 512-dim embedding       │       │                           │
+  │  → 3-class head            │       │  Output: P_genetic        │
+  └───────────┬───────────────┘       └────────────┬─────────────┘
+              │ 512-dim embedding                   │ risk score
+              └─────────────────┬───────────────────┘
                                 ▼
-                   ┌────────────────────────┐
-                   │  Attention-Gated Fusion │
-                   │                        │
-                   │  α_eeg + α_genetic = 1 │
-                   │  (learned per patient)  │
-                   └────────────┬───────────┘
+                   ┌─────────────────────────┐
+                   │  Attention-Gated Fusion  │
+                   │  α = σ(W_e·h_e+W_g·h_g+b) │
+                   │  P_final = α·EEG+(1−α)·Gen│
+                   └────────────┬─────────────┘
                                 ▼
-                   ┌────────────────────────┐
-                   │   Risk Score P ∈ [0,1]  │
-                   │   4-Level Alert System  │
-                   └────────────────────────┘
+                   ┌─────────────────────────┐
+                   │   Risk Score P ∈ [0,1]   │
+                   │   4-Level Alert System   │
+                   └─────────────────────────┘
 ```
 
 ---
 
-## Project Phases
+## Project Status
 
-| Phase | Description | Status |
-|-------|-------------|--------|
-| 1 | Environment Setup & Data Acquisition | ✅ Complete |
-| 2 | EEG Preprocessing & Feature Extraction | ✅ Complete |
-| 3 | Genetic Feature Engineering | ✅ Complete |
-| 4 | Synthetic Data Generation (CTGAN) | ✅ Complete |
-| 5 | Individual Model Training (LSTM + XGBoost) | 🔄 In Progress |
-| 6 | Attention-Based Fusion Training | 📋 Planned |
-| 7 | Evaluation & Benchmarking | 📋 Planned |
-| 8 | FastAPI Backend | 📋 Planned |
-| 9 | React.js Dashboard | 📋 Planned |
-| 10 | Integration & Testing | 📋 Planned |
+| Component | Description | Status |
+|-----------|-------------|--------|
+| Data Acquisition | CHB-MIT + ClinVar + gnomAD + GWAS | ✅ Complete |
+| EEG Preprocessing | Bandpass, resample, z-score (per-window, lazy) | ✅ Complete |
+| Genetic Feature Engineering | 22-dim vector + PRS | ✅ Complete |
+| Synthetic Data (CTGAN) | 5,000 validation records, KS-tested | ✅ Complete |
+| EEG Branch (BiLSTM + Attention) | Trained, 96.34% test accuracy | ✅ Complete |
+| Genetic Branch (XGBoost) | Trained, AUC 0.739 / AUC-PR 0.869 | ✅ Complete |
+| Fusion Layer | Trained, AUC 0.888 (+14.4% over EEG-only) | ✅ Complete |
+| Showcase Dashboard (React) | Reactive pipeline + fusion simulator + live demo | ✅ Complete |
+| Backend API (FastAPI) | Real-time BiLSTM inference on uploaded EDF files | ✅ Complete |
 
 ---
 
@@ -82,101 +87,150 @@ Epilepsy affects ~50 million people worldwide. Existing seizure prediction syste
 
 | Dataset | Source | Purpose | Size |
 |---------|--------|---------|------|
-| [CHB-MIT EEG](https://physionet.org/content/chbmit/1.0.0/) | PhysioNet | Training EEG branch | ~40 GB (subset: ~15 GB) |
+| [CHB-MIT EEG](https://physionet.org/content/chbmit/1.0.0/) | PhysioNet | Training the EEG branch | ~40–45 GB |
 | [ClinVar](https://www.ncbi.nlm.nih.gov/clinvar/) | NCBI | Gene mutation flags | 13,331 pathogenic variants |
 | [gnomAD v2.1.1](https://gnomad.broadinstitute.org/) | Broad Institute | Gene constraint (pLI) | 9 genes |
 | [GWAS Catalog](https://www.ebi.ac.uk/gwas/) | EBI / Literature | Polygenic Risk Score | 15 epilepsy SNPs |
 
-**EEG patients used:** chb01, chb03, chb05 (119 EDF files, 19 annotated seizures, 30-min preictal windows)
+**EEG patients used (11):** chb01, chb02, chb03, chb04, chb07, chb09, chb11, chb14, chb15, chb18, chb24
+— **355 EDF files**, 68 with seizure annotations, 256 Hz (downsampled to 128 Hz).
 
-**Target genes:** SCN1A · SCN8A · KCNQ2 · SCN2A · KCNT1 · DEPDC5 · PCDH19 · GRIN2A · GABRA1
+**Target genes (9):** SCN1A · SCN8A · KCNQ2 · SCN2A · KCNT1 · DEPDC5 · PCDH19 · GRIN2A · GABRA1
 
 ---
 
-## Preprocessing Pipeline
+## EEG Preprocessing Pipeline
+
+Preprocessing is applied **per-window** in `seizure_prediction/libCHBMITDataset.py` (lazy loading — only the needed 30-second slice is read from disk, keeping RAM < 3 GB). The model trains on the **raw preprocessed signal**; no spectral/Hjorth feature extraction is performed.
 
 ```
 EDF File (CHB-MIT, 256 Hz)
   │
-  ├─ Channel selection: 17–18 bipolar 10-20 channels
-  ├─ Bandpass filter: 0.5–70 Hz (4th-order Butterworth, zero-phase)
-  ├─ Notch filter: 60 Hz
-  ├─ Re-reference: Common Average Reference (CAR)
-  ├─ Artifact rejection: peak-to-peak > 500 µV → excluded
-  └─ Sliding epochs: 5 s window, 1 s stride
-       ├─ Label 0: Interictal (baseline)
-       ├─ Label 1: Preictal (≤ 30 min before seizure onset)
-       └─ Label -1: Ictal / postictal → excluded from training
+  ├─ EDF read: only the required 30-second window (PyEDFlib)
+  ├─ Channel selection: 19 common bipolar 10-20 channels
+  ├─ Bandpass filter: 0.5–45 Hz (4th-order Butterworth)
+  ├─ Resample: 256 Hz → 128 Hz
+  ├─ Z-score normalisation: per channel (zero mean, unit variance)
+  └─ Transpose: (channels, time) → (time, channels)
+       → Input tensor: (batch=16, time=3840, channels=19)
 ```
 
-**Feature extraction (per epoch):** 13 features × 17 channels = **221-dimensional vector**
-- Band powers: δ, θ, α, β, γ (Welch PSD)
-- Ratios: α/β, θ/α
-- Hjorth parameters: Activity, Mobility, Complexity
-- Spike rate (peaks > 3 SD / sec)
-- Sample Entropy (m=2, r=0.2×SD)
+**Three-zone labeling** per seizure: interictal (0) · preictal (1, 25-min window) · 5-min prediction-horizon gap (0) · ictal (2).
 
-**Processed data (all 8 patients — complete):**
-- chb01: 95,699 epochs (86,837 interictal | 8,862 preictal) — full download
-- chb03: 87,780 epochs (80,519 interictal | 7,261 preictal) — full download
-- chb05: 49,919 epochs (47,107 interictal | 2,812 preictal) — full download
-- chb06: 17,472 epochs (16,216 interictal | 1,256 preictal) — selective download
-- chb08: 14,662 epochs (12,883 interictal | 1,779 preictal) — selective download
-- chb10: 16,642 epochs (14,839 interictal | 1,803 preictal) — selective download
-- chb16: 17,547 epochs (15,261 interictal | 2,286 preictal) — selective download
-- chb20: 33,894 epochs (27,385 interictal | 6,509 preictal) — selective download
-- **Total: 333,615 valid epochs | 32,568 preictal | ~9.2:1 class ratio**
+**Window class distribution (53,858 windows):** Interictal 96.0% · Preictal 3.8% · Ictal 0.2%.
 
 ---
 
-## Genetic Feature Vector (12 dimensions)
+## Genetic Feature Vector (22 dimensions)
 
 ```python
 [
-  SCN1A_mut, SCN8A_mut, KCNQ2_mut,   # Binary mutation flags from ClinVar
-  SCN2A_mut, KCNT1_mut, DEPDC5_mut,  # (ClinVar: Pathogenic / Likely pathogenic)
-  PCDH19_mut, GRIN2A_mut, GABRA1_mut,
-  SCN1A_pLI,          # gnomAD v2.1.1 pLI score (1.0 = highly intolerant)
-  SCN8A_pLI,          # gnomAD v2.1.1 pLI score
-  PRS_standardised,   # Polygenic Risk Score from 15 GWAS SNPs, zscore-normalised
+  # [0-8]  Weighted mutation flags (0 or gene risk weight)
+  SCN1A_mutation, SCN8A_mutation, KCNQ2_mutation, SCN2A_mutation,
+  KCNT1_mutation, DEPDC5_mutation, PCDH19_mutation, GRIN2A_mutation, GABRA1_mutation,
+  # [9-15] gnomAD pLI scores
+  SCN1A_pLI, SCN8A_pLI, KCNQ2_pLI, SCN2A_pLI, GRIN2A_pLI, PCDH19_pLI, GABRA1_pLI,
+  # [16]   Polygenic Risk Score (standardised)
+  polygenic_risk_score,
+  # [17-21] Engineered interaction / aggregate features
+  sodium_channel_interaction, potassium_channel_interaction,
+  receptor_interaction, prs_tier1_interaction, mutation_burden,
 ]
 ```
 
-**PRS formula:** `PRS = Σ ln(OR_i) × genotype_i`  where genotype_i ∈ {0, 1, 2} (Hardy-Weinberg sampled from GWAS risk allele frequencies)
+**PRS formula:** `PRS = Σ ln(OR_i) × genotype_i`, where `genotype_i ∈ {0,1,2}` is Hardy-Weinberg sampled from GWAS risk-allele frequencies, then z-score standardised.
+
+**Cohort:** The genetic branch is trained on **10,000 fully synthetic patients** generated from population-level carrier frequencies. CHB-MIT provides no genetic sequencing, so no real patient genetics are used. See `scripts/generate_synthetic_genetic_patients.py`.
+
+---
+
+## Results
+
+### EEG Branch (BiLSTM + Attention) — 53,858 windows
+| Metric | Value |
+|--------|-------|
+| Overall accuracy | **96.34%** |
+| Ictal recall (seizure detection) | 89.4% |
+| Preictal recall (prediction) | 73.4% |
+| Interictal specificity | 97.3% |
+
+### Genetic Branch (XGBoost) — 10,000 synthetic patients
+| Metric | Value |
+|--------|-------|
+| AUC | 0.739 |
+| AUC-PR | 0.869 |
+| Precision | 0.867 |
+| Recall | 0.553 |
+
+### Fusion Layer — EEG-only vs Fusion (13,508 test windows)
+| Metric | EEG-only | Fusion | Δ |
+|--------|----------|--------|---|
+| AUC | 0.744 | **0.888** | +14.4% |
+| AUC-PR | 0.255 | **0.443** | +18.7% |
+| F1 | 0.352 | **0.456** | +10.4% |
+| Recall | 0.320 | **0.413** | +9.3% |
+| MCC | 0.327 | **0.437** | +11.0% |
+
+Fusion catches 55 more seizure windows while reducing false positives by 61. The learned attention settled near α ≈ 0.50 because the synthetic genetic scores have very low variance; the gains flow through the risk head, which also receives the raw genetic score directly.
+
+### CTGAN Validation
+KS pass rate 31.6% overall (genetic columns 100%, EEG columns 0%) — used as a validation benchmark only.
 
 ---
 
 ## Quick Start
 
 ```bash
-# 1. Clone and setup
+# 1. Clone and set up the Python environment
 git clone https://github.com/<your-username>/eeg-genetic-fusion.git
 cd eeg-genetic-fusion
 python3 -m venv venv && source venv/bin/activate
 pip install -r requirements.txt
 
-# 2. Download datasets
-python scripts/acquire_genetic_data.py        # Downloads ClinVar, gnomAD, GWAS
-python scripts/acquire_chbmit.py \
-    --patients chb01 chb03 chb05 \
-    --data-dir data/raw/chb-mit               # ~15 GB; can resume if interrupted
+# 2. Acquire datasets
+python scripts/acquire_genetic_data.py          # ClinVar + gnomAD + GWAS
+python scripts/acquire_chbmit.py                 # CHB-MIT EDF files (large; resumable)
 
-# 3. EEG preprocessing
-python src/data_pipeline/eeg_preprocessing.py --all
-# Outputs: data/processed/eeg_features/<patient>_{sequences,features,labels}.npy
+# 3. Genetic pipeline
+python scripts/generate_synthetic_genetic_patients.py --n-patients 10000
+python scripts/train_xgboost_genetic.py          # → models/xgboost_genetic/
 
-# 4. Genetic feature engineering
-python src/data_pipeline/genetic_feature_engineering.py
-# Output: data/processed/genetic_vectors/genetic_profiles.csv
+# 4. EEG branch (trained inside seizure_prediction/)
+cd seizure_prediction
+bash runTrainLSTM.sh                             # or: python scrTrainLSTM.py ...
+cd ..
 
-# 5. (Optional) Start PostgreSQL via Docker
-docker-compose up -d postgres
-
-# 6. FastAPI backend (once models are trained)
-uvicorn src.api.main:app --reload --port 8000
+# 5. Fusion pipeline
+python scripts/extract_eeg_embeddings.py         # cache 512-dim embeddings (~2.5h)
+python scripts/train_fusion_clean.py             # train the attention-gated fusion
+python scripts/evaluate_fusion.py                # EEG-only vs fusion comparison
 ```
 
-> **Note:** EDF files (~40 MB each) and processed `.npy` arrays (up to 7 GB each) are excluded from this repository. Download them locally using the acquisition scripts above.
+### Frontend dashboard
+
+```bash
+cd frontend/dashboard
+npm install
+npm run dev        # http://localhost:5173
+npm run build      # production build → dist/
+```
+
+The dashboard is fully static and reads pre-extracted results from `frontend/dashboard/src/data/*.json` — no backend required for the showcase sections.
+
+### Live inference API (for the upload-an-EDF demo)
+
+```bash
+# from the project root
+./venv/bin/python -m uvicorn src.api.main:app --port 8000
+# or: bash scripts/run_inference_api.sh
+```
+
+Loads the real all-patients BiLSTM and exposes `POST /api/predict` (upload a
+`.edf`, get per-window interictal/preictal/ictal predictions). The dashboard's
+**Live Demo** section auto-detects it at `http://localhost:8000`; if it's
+offline it falls back to a labelled simulated playback.
+
+> **Note:** EDF files and large processed arrays are excluded from the repository (see `.gitignore`). Regenerate them locally with the acquisition scripts above.
 
 ---
 
@@ -186,43 +240,61 @@ uvicorn src.api.main:app --reload --port 8000
 eeg-genetic-fusion/
 │
 ├── configs/
-│   └── config.yaml                   # All hyperparameters, paths, band definitions
+│   └── config.yaml                   # Hyperparameters, paths, band definitions
 │
 ├── data/
-│   ├── raw/
-│   │   ├── chb-mit/                  # EDF files — NOT tracked (see .gitignore)
-│   │   │   └── seizure_annotations.csv  # ✅ Tracked — 19 seizure ground truths
-│   │   ├── clinvar/
-│   │   │   └── epilepsy_variants.csv    # ✅ Tracked — 13,331 pathogenic variants
-│   │   ├── gnomad/
-│   │   │   └── pli_scores.csv           # ✅ Tracked — pLI for 9 genes
-│   │   └── gwas/
-│   │       └── epilepsy_snps.csv        # ✅ Tracked — 15 GWAS SNPs
-│   ├── processed/                    # .npy arrays — NOT tracked (regenerate locally)
+│   ├── raw/                          # EDF + genomic source files (mostly untracked)
+│   │   ├── chb-mit/                  # EDF files — NOT tracked
+│   │   ├── clinvar/epilepsy_variants.csv     # 13,331 pathogenic variants
+│   │   ├── gnomad/pli_scores.csv             # pLI scores
+│   │   └── gwas/epilepsy_snps.csv            # 15 GWAS SNPs
+│   ├── processed/
+│   │   ├── genetic_vectors/          # genetic_profiles.csv, training_cohort.csv
+│   │   └── synthetic/                # CTGAN model + synthetic records + report
 │   └── splits/
+│
+├── seizure_prediction/               # EEG branch (BiLSTM + attention)
+│   ├── libCHBMITDataset.py           # Lazy dataset: filter, resample, z-score
+│   ├── libDataIO.py                  # EDF reading, 3-zone preictal labeling
+│   ├── libModelLSTM.py               # BiLSTM + attention (clsLSTM, get_embedding)
+│   ├── scrTrainLSTM.py / scrTestLSTM.py
+│   └── setup_chbmit.py               # Downloader + annotation converter
 │
 ├── src/
 │   ├── data_pipeline/
-│   │   ├── eeg_preprocessing.py      # MNE pipeline, epoching, 221-dim features
-│   │   ├── data_loader.py            # PyTorch Dataset + patient-level LOO-CV
-│   │   ├── genetic_feature_engineering.py  # 12-dim genetic vector construction
-│   │   └── prs_computation.py        # PRS computation (HWE simulation + standardisation)
-│   ├── models/                       # BiLSTM, XGBoost, CTGAN, Fusion (planned)
-│   ├── training/                     # Training scripts (planned)
-│   ├── evaluation/                   # Metrics, SHAP explainability (planned)
-│   └── api/                          # FastAPI backend (planned)
+│   │   ├── genetic_feature_engineering.py   # 22-dim genetic vector
+│   │   └── prs_computation.py               # Polygenic Risk Score
+│   ├── training/
+│   │   └── fusion.py                 # AttentionGateFusion + trainer + inference
+│   ├── models/                       # (scaffold)
+│   ├── evaluation/                   # (scaffold)
+│   └── api/                          # FastAPI inference backend
+│       ├── main.py                   # endpoints: /api/health, /model-info, /predict
+│       └── inference.py              # EDF preprocessing + real BiLSTM inference
 │
 ├── scripts/
-│   ├── acquire_chbmit.py             # CHB-MIT downloader with resume support
+│   ├── acquire_chbmit.py             # CHB-MIT downloader
 │   ├── acquire_genetic_data.py       # ClinVar + gnomAD + GWAS downloader
-│   └── run_acquisition.py            # Master orchestrator
+│   ├── generate_synthetic_genetic_patients.py
+│   ├── train_xgboost_genetic.py
+│   ├── extract_eeg_embeddings.py     # one-time embedding extraction
+│   ├── train_fusion_clean.py         # fusion training
+│   └── evaluate_fusion.py            # EEG-only vs fusion comparison
 │
-├── notebooks/                        # EDA notebooks (planned)
-├── models/                           # Saved weights — NOT tracked
-├── frontend/dashboard/               # React.js dashboard (planned)
-├── tests/
+├── models/
+│   └── xgboost_genetic/              # Trained XGBoost model, metrics, plots
 │
-├── TECHNICAL_REFERENCE.md            # Full technical spec for paper writing
+├── fusion results/                   # Trained fusion model + metrics + plots
+│   ├── fusion_best.pt / fusion_final.pt
+│   ├── fusion_evaluation.json        # EEG-only vs fusion
+│   ├── fusion_metrics.json           # training history + test metrics
+│   └── plots/
+│
+├── frontend/dashboard/               # React + Vite showcase dashboard
+│   ├── src/components/               # Hero, Datasets, Fusion simulator, etc.
+│   └── src/data/                     # Static result JSON powering the UI
+│
+├── TECHNICAL_REFERENCE.md            # Full technical spec
 ├── requirements.txt
 ├── docker-compose.yml
 └── .gitignore
@@ -230,36 +302,19 @@ eeg-genetic-fusion/
 
 ---
 
-## Target Performance
-
-| Metric | Target |
-|--------|--------|
-| AUROC | > 0.90 |
-| Sensitivity (at FPR = 10%) | > 85% |
-| Specificity | > 90% |
-| False Prediction Rate | < 0.15 / hour |
-| Seizure Prediction Horizon | 30 minutes |
-
-**Baselines from literature:**
-- Tsiouris et al. 2018 (LSTM, CHB-MIT): 99.6% accuracy
-- Zhu et al. 2024 (Multidimensional Transformer): 98.24% sensitivity, 97.27% specificity
-
----
-
 ## Tech Stack
 
 | Layer | Technology |
 |-------|-----------|
-| EEG Signal Processing | MNE-Python 1.12, SciPy |
+| EEG Signal Processing | PyEDFlib, SciPy |
 | Deep Learning | PyTorch ≥ 2.0 |
 | Classical ML | XGBoost ≥ 1.7 |
 | Synthetic Data | CTGAN / SDV |
 | Explainability | SHAP |
+| Frontend | React 18, Vite, Tailwind CSS, Recharts, Framer Motion |
 | Backend API | FastAPI + Uvicorn |
-| Database | PostgreSQL 15 + SQLAlchemy |
-| Frontend | React 18, Vite, Recharts, Socket.io |
 | Containerisation | Docker Compose |
-| Python | 3.12.12 |
+| Python | 3.12 |
 
 ---
 

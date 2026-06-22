@@ -1,0 +1,87 @@
+{
+  "eeg": {
+    "architecture": "Bidirectional LSTM + Attention",
+    "params": 2287620,
+    "config": [
+      { "k": "Hidden dim", "v": "256" },
+      { "k": "LSTM layers", "v": "2 (bidirectional)" },
+      { "k": "Dropout", "v": "0.5" },
+      { "k": "Optimizer", "v": "AdamW" },
+      { "k": "Learning rate", "v": "0.001" },
+      { "k": "Epochs", "v": "15" },
+      { "k": "Batch size", "v": "16" },
+      { "k": "Embedding", "v": "512-dim" }
+    ],
+    "loss_curve": [
+      { "epoch": 1, "train": 0.9774, "val": 0.9603 },
+      { "epoch": 2, "train": 0.2664, "val": 0.5430 },
+      { "epoch": 3, "train": 0.2070, "val": 0.4902 },
+      { "epoch": 4, "train": 0.1690, "val": 0.5209 },
+      { "epoch": 5, "train": 0.1389, "val": 0.5830 },
+      { "epoch": 6, "train": 0.1160, "val": 0.6194 },
+      { "epoch": 7, "train": 0.1075, "val": 0.6214 },
+      { "epoch": 8, "train": 0.0920, "val": 0.6793 },
+      { "epoch": 9, "train": 0.0885, "val": 0.6994 },
+      { "epoch": 10, "train": 0.0746, "val": 0.6592 },
+      { "epoch": 11, "train": 0.0742, "val": 0.6511 },
+      { "epoch": 12, "train": 0.0652, "val": 0.7722 },
+      { "epoch": 13, "train": 0.0574, "val": 0.7860 },
+      { "epoch": 14, "train": 0.0528, "val": 0.6837 },
+      { "epoch": 15, "train": 0.0501, "val": 0.7880 }
+    ],
+    "confusion": {
+      "labels": ["Interictal", "Preictal", "Ictal"],
+      "matrix": [
+        [50284, 1303, 113],
+        [542, 1493, 0],
+        [13, 0, 110]
+      ]
+    },
+    "per_class": [
+      { "class": "Interictal", "precision": 0.9891, "recall": 0.9726, "f1": 0.9808 },
+      { "class": "Preictal", "precision": 0.5340, "recall": 0.7337, "f1": 0.6181 },
+      { "class": "Ictal", "precision": 0.4933, "recall": 0.8943, "f1": 0.6358 }
+    ],
+    "accuracy": 96.34,
+    "roc_auc": [
+      { "class": "Interictal", "auc": 0.99 },
+      { "class": "Preictal", "auc": 0.85 },
+      { "class": "Ictal", "auc": 0.96 }
+    ],
+    "highlights": [
+      { "label": "Ictal recall (seizure detection)", "value": "89.4%" },
+      { "label": "Preictal recall (prediction)", "value": "73.4%" },
+      { "label": "False-alarm rate (preictal)", "value": "2.5%" },
+      { "label": "Training time (15 epochs)", "value": "22h 01m" }
+    ]
+  },
+  "genetic": {
+    "architecture": "XGBoost · 22-dim genetic vector",
+    "config": [
+      { "k": "n_estimators", "v": "300" },
+      { "k": "max_depth", "v": "3" },
+      { "k": "min_child_weight", "v": "4" },
+      { "k": "subsample", "v": "0.75" },
+      { "k": "colsample_bytree", "v": "0.80" },
+      { "k": "reg_alpha (L1)", "v": "0.5" },
+      { "k": "reg_lambda (L2)", "v": "2.0" }
+    ],
+    "metrics": [
+      { "name": "AUC", "value": 0.739 },
+      { "name": "AUC-PR", "value": 0.869 },
+      { "name": "Precision", "value": 0.867 },
+      { "name": "Recall", "value": 0.553 },
+      { "name": "F1", "value": 0.675 },
+      { "name": "Specificity", "value": 0.808 }
+    ],
+    "shap_ranking": [
+      "Mutation burden score",
+      "SCN1A weighted flag",
+      "Polygenic risk score",
+      "KCNQ2 / SCN2A flag",
+      "pLI scores",
+      "Ion-channel burden"
+    ],
+    "profile": "Conservative but accurate. High precision means few false alarms; moderate recall means some true cases are missed — clinically reasonable for a screening tool."
+  }
+}

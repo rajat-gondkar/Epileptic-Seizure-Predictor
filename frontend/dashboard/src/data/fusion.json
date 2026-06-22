@@ -1,0 +1,42 @@
+{
+  "test_samples": 13508,
+  "positive_samples": 593,
+  "comparison": [
+    { "metric": "AUC", "eeg": 0.7437, "fusion": 0.8881, "improvement": 14.4 },
+    { "metric": "AUC-PR", "eeg": 0.2554, "fusion": 0.4427, "improvement": 18.7 },
+    { "metric": "F1", "eeg": 0.3519, "fusion": 0.4562, "improvement": 10.4 },
+    { "metric": "Precision", "eeg": 0.3901, "fusion": 0.5094, "improvement": 11.9 },
+    { "metric": "Recall", "eeg": 0.3204, "fusion": 0.4132, "improvement": 9.3 },
+    { "metric": "Specificity", "eeg": 0.9770, "fusion": 0.9817, "improvement": 0.5 },
+    { "metric": "MCC", "eeg": 0.3268, "fusion": 0.4366, "improvement": 11.0 }
+  ],
+  "confusion": {
+    "eeg": { "tp": 190, "fp": 297, "fn": 403, "tn": 12618 },
+    "fusion": { "tp": 245, "fp": 236, "fn": 348, "tn": 12679 }
+  },
+  "attention": { "mean": 0.4996, "std": 0.0 },
+  "training": {
+    "epochs": 30,
+    "lr": 0.001,
+    "batch_size": 32,
+    "best_val_auc": 0.9027,
+    "best_val_loss": 0.1153
+  },
+  "alert_levels": [
+    { "level": 1, "name": "Low", "max": 0.25, "color": "#34d399", "hex": "Green", "desc": "Routine monitoring" },
+    { "level": 2, "name": "Moderate", "max": 0.50, "color": "#facc15", "hex": "Yellow", "desc": "Increased observation" },
+    { "level": 3, "name": "High", "max": 0.75, "color": "#fb923c", "hex": "Orange", "desc": "Alert care team" },
+    { "level": 4, "name": "Critical", "max": 1.01, "color": "#ef4444", "hex": "Red", "desc": "Immediate intervention" }
+  ],
+  "key_findings": [
+    "Fusion improves over the EEG-only baseline on every single metric.",
+    "Catches 55 more seizure windows while cutting false positives by 61.",
+    "Largest gains are in AUC-PR (+18.7%) and recall — the most clinically relevant measures.",
+    "Best validation AUC of 0.903 reached at epoch 25."
+  ],
+  "limitations": [
+    "Genetic cohort is fully synthetic — CHB-MIT has no sequencing data.",
+    "Synthetic genetic scores have near-zero variance, so the attention gate learned a fixed ~50/50 split. Gains flow through the risk head, which also sees the raw genetic score.",
+    "Per-window genetic scores are sampled independently to prevent label leakage."
+  ]
+}

@@ -1,0 +1,41 @@
+{
+  "feature_vector": [
+    { "idx": 0, "name": "SCN1A_mutation", "group": "mutation", "desc": "Weighted SCN1A pathogenic mutation flag (weight 1.00)" },
+    { "idx": 1, "name": "SCN8A_mutation", "group": "mutation", "desc": "Weighted SCN8A mutation flag (weight 0.85)" },
+    { "idx": 2, "name": "KCNQ2_mutation", "group": "mutation", "desc": "Weighted KCNQ2 mutation flag (weight 0.95)" },
+    { "idx": 3, "name": "SCN2A_mutation", "group": "mutation", "desc": "Weighted SCN2A mutation flag (weight 0.90)" },
+    { "idx": 4, "name": "KCNT1_mutation", "group": "mutation", "desc": "Weighted KCNT1 mutation flag (weight 0.80)" },
+    { "idx": 5, "name": "DEPDC5_mutation", "group": "mutation", "desc": "Weighted DEPDC5 mutation flag (weight 0.65)" },
+    { "idx": 6, "name": "PCDH19_mutation", "group": "mutation", "desc": "Weighted PCDH19 mutation flag (weight 0.40)" },
+    { "idx": 7, "name": "GRIN2A_mutation", "group": "mutation", "desc": "Weighted GRIN2A mutation flag (weight 0.55)" },
+    { "idx": 8, "name": "GABRA1_mutation", "group": "mutation", "desc": "Weighted GABRA1 mutation flag (weight 0.50)" },
+    { "idx": 9, "name": "SCN1A_pLI", "group": "pli", "desc": "Loss-of-function intolerance score for SCN1A" },
+    { "idx": 10, "name": "SCN8A_pLI", "group": "pli", "desc": "Loss-of-function intolerance score for SCN8A" },
+    { "idx": 11, "name": "KCNQ2_pLI", "group": "pli", "desc": "Loss-of-function intolerance score for KCNQ2" },
+    { "idx": 12, "name": "SCN2A_pLI", "group": "pli", "desc": "Loss-of-function intolerance score for SCN2A" },
+    { "idx": 13, "name": "GRIN2A_pLI", "group": "pli", "desc": "Loss-of-function intolerance score for GRIN2A" },
+    { "idx": 14, "name": "PCDH19_pLI", "group": "pli", "desc": "Loss-of-function intolerance score for PCDH19" },
+    { "idx": 15, "name": "GABRA1_pLI", "group": "pli", "desc": "Loss-of-function intolerance score for GABRA1" },
+    { "idx": 16, "name": "polygenic_risk_score", "group": "prs", "desc": "Standardised PRS from 15 GWAS SNPs" },
+    { "idx": 17, "name": "sodium_channel_interaction", "group": "interaction", "desc": "SCN1A × SCN2A × SCN8A interaction" },
+    { "idx": 18, "name": "potassium_channel_interaction", "group": "interaction", "desc": "KCNQ2 × KCNT1 interaction" },
+    { "idx": 19, "name": "receptor_interaction", "group": "interaction", "desc": "GABRA1 × GRIN2A interaction" },
+    { "idx": 20, "name": "prs_tier1_interaction", "group": "interaction", "desc": "PRS × Tier-1 mutation interaction" },
+    { "idx": 21, "name": "mutation_burden", "group": "interaction", "desc": "Sum of all weighted mutations" }
+  ],
+  "groups": {
+    "mutation": { "label": "Gene Mutation Flags", "color": "#a78bfa" },
+    "pli": { "label": "pLI Constraint Scores", "color": "#818cf8" },
+    "prs": { "label": "Polygenic Risk Score", "color": "#c084fc" },
+    "interaction": { "label": "Interaction / Aggregate", "color": "#e879f9" }
+  },
+  "tiers": [
+    { "tier": "Tier 1", "genes": [{ "g": "SCN1A", "w": 1.0 }, { "g": "KCNQ2", "w": 0.95 }, { "g": "SCN2A", "w": 0.9 }], "relevance": "Severe DEE, drug-resistant epilepsy", "color": "#ef4444" },
+    { "tier": "Tier 2", "genes": [{ "g": "SCN8A", "w": 0.85 }, { "g": "KCNT1", "w": 0.8 }], "relevance": "Significant, variable severity", "color": "#f59e0b" },
+    { "tier": "Tier 3", "genes": [{ "g": "DEPDC5", "w": 0.65 }, { "g": "GRIN2A", "w": 0.55 }, { "g": "GABRA1", "w": 0.5 }, { "g": "PCDH19", "w": 0.4 }], "relevance": "Milder or focal epilepsies", "color": "#22d3ee" }
+  ],
+  "cohort": {
+    "patients": 10000,
+    "note": "Fully synthetic cohort generated from population-level carrier frequencies. CHB-MIT provides no genetic sequencing, so no real patient genetics are used."
+  }
+}

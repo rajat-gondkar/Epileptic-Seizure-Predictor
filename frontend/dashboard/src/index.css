@@ -1,0 +1,94 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color-scheme: dark;
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+body {
+  @apply bg-ink-950 text-slate-200 font-sans antialiased;
+  background-image:
+    radial-gradient(60rem 60rem at 80% -10%, rgba(34, 211, 238, 0.06), transparent 60%),
+    radial-gradient(50rem 50rem at -10% 20%, rgba(167, 139, 250, 0.06), transparent 60%),
+    radial-gradient(50rem 50rem at 50% 120%, rgba(52, 211, 153, 0.05), transparent 60%);
+  background-attachment: fixed;
+}
+
+/* Custom scrollbar */
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-track {
+  background: #0a0e1a;
+}
+::-webkit-scrollbar-thumb {
+  background: #283044;
+  border-radius: 6px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #3a455e;
+}
+
+@layer components {
+  .glass {
+    @apply bg-ink-850/70 backdrop-blur-xl border border-white/[0.06] rounded-2xl;
+  }
+  .glass-hover {
+    @apply transition-all duration-300 hover:border-white/[0.14] hover:bg-ink-800/70;
+  }
+  .section-pad {
+    @apply max-w-7xl mx-auto px-5 sm:px-8 py-20 sm:py-28;
+  }
+  .eyebrow {
+    @apply inline-flex items-center gap-2 text-xs font-semibold tracking-[0.2em] uppercase text-slate-400;
+  }
+  .stat-num {
+    @apply font-mono font-semibold tabular-nums;
+  }
+  .grad-text {
+    @apply bg-clip-text text-transparent bg-gradient-to-r from-eeg via-gene to-fuse;
+  }
+}
+
+/* Recharts tooltip dark override */
+.recharts-default-tooltip {
+  background: rgba(15, 20, 36, 0.95) !important;
+  border: 1px solid rgba(255, 255, 255, 0.1) !important;
+  border-radius: 10px !important;
+}
+
+.recharts-cartesian-axis-tick-value {
+  fill: #94a3b8;
+  font-size: 11px;
+}
+
+/* Range slider thumb */
+input[type='range']::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  height: 20px;
+  width: 20px;
+  border-radius: 9999px;
+  background: #0a0e1a;
+  border: 3px solid currentColor;
+  cursor: pointer;
+  box-shadow: 0 0 12px rgba(255, 255, 255, 0.15);
+  margin-top: -1px;
+}
+input[type='range']::-moz-range-thumb {
+  height: 18px;
+  width: 18px;
+  border-radius: 9999px;
+  background: #0a0e1a;
+  border: 3px solid #34d399;
+  cursor: pointer;
+}
+input[type='range'] {
+  color: #34d399;
+}

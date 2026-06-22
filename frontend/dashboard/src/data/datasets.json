@@ -1,0 +1,76 @@
+{
+  "cards": [
+    {
+      "name": "CHB-MIT Scalp EEG",
+      "source": "PhysioNet",
+      "accent": "eeg",
+      "stats": [
+        { "k": "Patients", "v": "11" },
+        { "k": "EDF files", "v": "355" },
+        { "k": "Files w/ seizures", "v": "68" },
+        { "k": "Sampling", "v": "256 → 128 Hz" }
+      ],
+      "desc": "Primary EEG dataset. 23-channel scalp recordings in European Data Format, read lazily so only the needed 30-second slice loads from disk."
+    },
+    {
+      "name": "ClinVar Variants",
+      "source": "NCBI",
+      "accent": "gene",
+      "stats": [
+        { "k": "Pathogenic variants", "v": "13,331" },
+        { "k": "Target genes", "v": "9" },
+        { "k": "Classification", "v": "Pathogenic" },
+        { "k": "Download", "v": "373 MB" }
+      ],
+      "desc": "Filtered to 9 epilepsy-relevant genes with Pathogenic / Likely-pathogenic classification only."
+    },
+    {
+      "name": "gnomAD Constraint",
+      "source": "Broad Institute",
+      "accent": "gene",
+      "stats": [
+        { "k": "Metric", "v": "pLI" },
+        { "k": "Version", "v": "v2.1.1" },
+        { "k": "Genes scored", "v": "9" },
+        { "k": "SCN1A pLI", "v": "1.000" }
+      ],
+      "desc": "Loss-of-function intolerance (pLI) scores. Values near 1.0 mean the gene cannot tolerate protein-truncating variants."
+    },
+    {
+      "name": "GWAS Catalog",
+      "source": "Literature-curated",
+      "accent": "gene",
+      "stats": [
+        { "k": "SNPs", "v": "15" },
+        { "k": "Effect measure", "v": "Odds Ratio" },
+        { "k": "Use", "v": "Polygenic Risk" },
+        { "k": "Min p-value", "v": "2.4e-15" }
+      ],
+      "desc": "15 genome-wide significant epilepsy-associated SNPs used to compute the polygenic risk score (PRS)."
+    }
+  ],
+  "patients": [
+    { "id": "chb01", "files": 42, "seizureFiles": 7 },
+    { "id": "chb02", "files": 36, "seizureFiles": 3 },
+    { "id": "chb03", "files": 38, "seizureFiles": 7 },
+    { "id": "chb04", "files": 42, "seizureFiles": 3 },
+    { "id": "chb07", "files": 19, "seizureFiles": 3 },
+    { "id": "chb09", "files": 19, "seizureFiles": 3 },
+    { "id": "chb11", "files": 35, "seizureFiles": 3 },
+    { "id": "chb14", "files": 26, "seizureFiles": 7 },
+    { "id": "chb15", "files": 40, "seizureFiles": 14 },
+    { "id": "chb18", "files": 36, "seizureFiles": 6 },
+    { "id": "chb24", "files": 22, "seizureFiles": 12 }
+  ],
+  "geneVariants": [
+    { "gene": "SCN1A", "variants": 4975, "pLI": 1.0 },
+    { "gene": "KCNQ2", "variants": 1839, "pLI": 0.99998 },
+    { "gene": "SCN2A", "variants": 1692, "pLI": 1.0 },
+    { "gene": "PCDH19", "variants": 1034, "pLI": 0.99975 },
+    { "gene": "SCN8A", "variants": 1019, "pLI": 1.0 },
+    { "gene": "GRIN2A", "variants": 1009, "pLI": 0.99998 },
+    { "gene": "DEPDC5", "variants": 975, "pLI": 0.1165 },
+    { "gene": "KCNT1", "variants": 488, "pLI": 0.00003 },
+    { "gene": "GABRA1", "variants": 300, "pLI": 0.91489 }
+  ]
+}

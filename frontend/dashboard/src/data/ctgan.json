@@ -1,0 +1,17 @@
+{
+  "pipeline": [
+    "Build a compact summary dataset from 279 EDF files (~20 channel-averaged EEG features)",
+    "Train a joint CTGAN on combined tabular EEG + genetic data",
+    "Generate 5,000 synthetic samples",
+    "Apply biological constraints so records stay plausible",
+    "Validate with Kolmogorov–Smirnov tests and correlation checks",
+    "Use the synthetic set as validation only — never as fusion training data"
+  ],
+  "ks_results": [
+    { "name": "Overall KS pass rate", "value": 31.6, "color": "#f59e0b" },
+    { "name": "Genetic columns passing KS", "value": 100, "color": "#34d399" },
+    { "name": "EEG columns passing KS", "value": 0, "color": "#ef4444" }
+  ],
+  "samples": 5000,
+  "interpretation": "Synthetic genetic features are tightly constrained, so they match the real distribution almost perfectly. EEG summaries are the harder distribution. The records serve as a validation benchmark only — the final fusion model trains on real EEG embeddings, never low-fidelity synthetic EEG."
+}

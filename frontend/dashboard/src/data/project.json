@@ -1,0 +1,19 @@
+{
+  "title": "EEG–Genetic Fusion",
+  "subtitle": "AI-Based EEG + Genetic Marker Fusion for Epileptic Seizure Prediction",
+  "tagline": "A multimodal late-fusion architecture that combines brain signals and DNA markers into one personalised seizure-risk score.",
+  "institution": "RVCE · Innovative Design Project (IDP)",
+  "guide": "Prof. Deepika P",
+  "team": [
+    "Rajat G A",
+    "Srijeeta Ghosh",
+    "Aamir Ibrahim",
+    "Misab Abdul Raheem"
+  ],
+  "headline_stats": [
+    { "label": "Fusion AUC", "value": 0.888, "format": "decimal3", "accent": "fuse", "note": "multimodal model" },
+    { "label": "Improvement over EEG-only", "value": 14.4, "format": "percent1", "accent": "eeg", "note": "absolute AUC gain" },
+    { "label": "EEG Test Accuracy", "value": 96.34, "format": "percent2", "accent": "eeg", "note": "53,858 windows" },
+    { "label": "Genetic AUC-PR", "value": 0.869, "format": "decimal3", "accent": "gene", "note": "10k synthetic cohort" }
+  ]
+}

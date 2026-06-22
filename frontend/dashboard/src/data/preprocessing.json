@@ -1,0 +1,29 @@
+{
+  "steps": [
+    { "title": "EDF Reading", "desc": "PyEDFlib reads only the required 30-second window from disk — keeps training RAM under 3 GB.", "icon": "file" },
+    { "title": "Channel Selection", "desc": "19 common bipolar channels kept across all 11 patients; 4 non-universal channels dropped.", "icon": "grid" },
+    { "title": "Bandpass Filter", "desc": "4th-order Butterworth, 0.5–45 Hz. Removes drift and high-frequency noise.", "icon": "wave" },
+    { "title": "Resampling", "desc": "256 Hz → 128 Hz. Halves memory and compute while preserving 0.5–45 Hz content.", "icon": "compress" },
+    { "title": "Z-Score Normalization", "desc": "Per-channel zero-mean, unit-variance — makes sessions and patients comparable.", "icon": "sigma" },
+    { "title": "Transpose", "desc": "(channels, time) → (time, channels) for batch-first LSTM input.", "icon": "swap" }
+  ],
+  "input_shape": { "batch": 16, "time_steps": 3840, "channels": 19 },
+  "channels": [
+    "FP1-F7", "F7-T7", "T7-P7", "P7-O1", "FP1-F3", "F3-C3", "C3-P3", "P3-O1",
+    "FP2-F4", "F4-C4", "C4-P4", "P4-O2", "FP2-F8", "F8-T8", "T8-P8", "P8-O2",
+    "FZ-CZ", "CZ-PZ", "T8-P8"
+  ],
+  "dropped_channels": ["FT10-T8", "FT9-FT10", "P7-T7", "T7-FT9"],
+  "class_distribution": [
+    { "name": "Interictal", "label": 0, "count": 51700, "pct": 96.0, "color": "#475569" },
+    { "name": "Preictal", "label": 1, "count": 2035, "pct": 3.8, "color": "#f59e0b" },
+    { "name": "Ictal", "label": 2, "count": 123, "pct": 0.2, "color": "#ef4444" }
+  ],
+  "total_windows": 53858,
+  "zones": [
+    { "zone": "Interictal", "label": 0, "desc": "Normal brain activity far from seizure", "color": "#475569" },
+    { "zone": "Preictal", "label": 1, "desc": "25 min pre-seizure window the model learns to detect", "color": "#f59e0b" },
+    { "zone": "Gap", "label": 0, "desc": "5 min prediction horizon — alarm must fire before this", "color": "#64748b" },
+    { "zone": "Ictal", "label": 2, "desc": "Ground-truth seizure activity", "color": "#ef4444" }
+  ]
+}
