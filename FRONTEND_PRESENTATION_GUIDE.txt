@@ -1,0 +1,313 @@
+==============================================================================
+  NEUROGENIX DASHBOARD - PRESENTATION GUIDE
+  EEG + Genetic Marker Fusion for Epileptic Seizure Prediction
+==============================================================================
+
+WHAT THIS PROJECT IS (the 20-second pitch)
+------------------------------------------------------------------------------
+Most seizure-prediction tools look only at brain signals (EEG) and treat every
+patient the same. But epilepsy has a strong genetic component. Our project
+combines TWO sources of information:
+
+  1. EEG  - the patient's live brain-wave recording
+  2. Genetics - the patient's epilepsy-related gene profile
+
+We built an AI model that FUSES both into a single, personalised seizure-risk
+score, and then turns that score into a simple 4-level clinical alert
+(Low / Moderate / High / Critical).
+
+The dashboard you are showing is the visual story of the whole system - from
+raw data, to the models, to the final fused prediction, plus a live demo where
+a patient file is analysed in front of the audience.
+
+
+==============================================================================
+  WALKING THROUGH THE PAGE (section by section)
+==============================================================================
+
+Tip: the page is built as a top-to-bottom "story". The navigation bar at the
+top lets you jump to any section, and a thin progress bar shows how far down
+you are.
+
+
+1) HERO  (the landing screen)
+------------------------------------------------------------------------------
+WHAT IT IS:  The opening screen with the project title and headline numbers.
+WHAT IT SHOWS:
+  - The project name and one-line description.
+  - Four big "headline" results that animate in:
+      * Fusion AUC 0.888  (overall quality of the fused model)
+      * +14.4% improvement over using EEG alone
+      * 96.34% EEG test accuracy
+      * 0.869 Genetic AUC-PR
+  - A simple architecture strip: EEG branch + Genetic branch -> Fusion ->
+    4-level alert.
+WHY:  It gives the audience the headline takeaways and the big picture in the
+first few seconds, before any detail.
+
+
+2) DATASETS  ("Data Foundation")
+------------------------------------------------------------------------------
+WHAT IT IS:  The data the whole project is built on.
+WHAT IT SHOWS:
+  - Four dataset cards: CHB-MIT (EEG recordings), ClinVar, gnomAD and GWAS
+    (the three genetic databases).
+  - A chart of how many EEG files we used per patient.
+  - A chart of how many disease-causing variants exist per epilepsy gene.
+WHY:  To prove the work is grounded in real, well-known medical datasets, and
+to show the scale of data we processed.
+
+
+3) EEG PREPROCESSING  ("From raw EDF to model-ready windows")
+------------------------------------------------------------------------------
+WHAT IT IS:  How raw brain recordings are cleaned before the model sees them.
+WHAT IT SHOWS:
+  - A 6-step cleaning pipeline (select channels, filter noise, resample,
+    normalise, etc.).
+  - A LIVE EEG trace with a toggle between "Raw signal" and "Filtered".
+      * Raw = messy, with drift, electrical noise and blink artifacts.
+      * Filtered = the clean signal the model actually learns from.
+  - A donut chart showing the big challenge: seizures are rare. 96% of the
+    data is "normal", only a tiny fraction is pre-seizure or seizure.
+WHY:  Brain signals are noisy. This shows we clean them properly, and it makes
+the "needle in a haystack" difficulty obvious.
+
+
+4) GENETIC FEATURE ENGINEERING  ("A 22-dimensional genetic fingerprint")
+------------------------------------------------------------------------------
+WHAT IT IS:  How a patient's genetics are turned into numbers the model can use.
+WHAT IT SHOWS:
+  - An interactive grid of 22 cells - each cell is one genetic feature
+    (gene mutations, gene-constraint scores, a polygenic risk score, and
+    combined risk features). Hovering explains each one.
+  - A "gene risk tier" panel: which genes are most dangerous (Tier 1) down to
+    milder ones (Tier 3), with their risk weights.
+WHY:  It shows that "genetics" isn't a vague idea here - it's a concrete,
+structured 22-number profile per patient, based on medical literature.
+
+
+5) SYNTHETIC DATA  (CTGAN)
+------------------------------------------------------------------------------
+WHAT IT IS:  Because real patients rarely have BOTH EEG and gene data together,
+we generated extra realistic synthetic samples to test data quality.
+WHAT IT SHOWS:
+  - The generation pipeline steps.
+  - Quality-check bars (how well the synthetic data matches real data).
+WHY:  It shows we handled the real-world problem of limited paired data, and
+that we validated the synthetic data honestly rather than blindly trusting it.
+
+
+6) MODEL TRAINING & TESTING
+------------------------------------------------------------------------------
+WHAT IT IS:  The two AI models, trained separately, with their results.
+WHAT IT SHOWS:  Two tabs you can switch between -
+  - EEG Branch: training curves, a confusion matrix (correct vs wrong
+    predictions), and per-class accuracy.
+  - Genetic Branch: the genetic model's scores and which genes it relied on
+    most.
+WHY:  To prove each half works well on its own, before we combine them.
+
+
+7) THE FUSION LAYER  +  FUSION SIMULATOR  (the centrepiece)
+------------------------------------------------------------------------------
+WHAT IT IS:  The heart of the project - where EEG and genetics are combined.
+WHAT IT SHOWS:
+  - A diagram of the "attention gate": it decides how much to trust the EEG
+    versus the genetics for each patient.
+  - An INTERACTIVE SIMULATOR: drag two sliders (EEG risk, genetic risk) and a
+    third for the attention weight. The dial instantly shows the fused risk
+    score and which alert level it lands in (Green/Yellow/Orange/Red).
+  - A comparison chart: Fusion vs EEG-only across every metric - fusion wins
+    on all of them.
+WHY:  This is the "aha" moment. The audience can physically play with the
+inputs and watch the combined risk change. It proves fusion is better than
+either signal alone.
+
+
+8) LIVE FUSION INFERENCE  (the live demo)
+------------------------------------------------------------------------------
+WHAT IT IS:  A real, end-to-end demonstration of the model analysing a patient.
+
+HOW THE DEMO WORKS (what you say to the audience):
+  "We upload a patient's fusion file - it contains that person's EEG window
+   readings plus their genetic profile. The system reads the file and runs the
+   fusion model on it, window by window, to produce a seizure-risk timeline."
+
+WHAT IT SHOWS, step by step, once a file is uploaded:
+  - The patient ID, their (fixed) genetic risk level, and which risk genes
+    they carry.
+  - An animated playback that moves through the recording in 30-second windows.
+  - For each window:
+      * the EEG-branch score (changes over time - the brain activity),
+      * the genetic-branch score (stays constant - genes don't change),
+      * the attention gate "alpha" (how the two are weighed),
+      * the FUSED risk score shown on a live dial,
+      * the matching alert level (Low/Moderate/High/Critical).
+  - A colour-coded timeline of the whole recording you can click through.
+  - A final verdict banner (e.g. "High seizure risk - preictal activity
+    flagged").
+
+WHY:  This is the proof that the system actually does something useful on a
+real patient case, not just charts. It is the most convincing part of the demo.
+
+IMPORTANT POINT TO MAKE - why genetic risk is constant:
+  Genetics never change over a recording, so the genetic score stays fixed for
+  a patient. The EEG score is what moves over time. For patients carrying
+  strong epilepsy genes, the model leans MORE on genetics (so their baseline
+  risk floor is higher); for patients with no significant genes, it leans on
+  the EEG. That is why different patient files behave differently.
+
+
+9) RESULTS  ("What we achieved")
+------------------------------------------------------------------------------
+WHAT IT IS:  The summary scoreboard.
+WHAT IT SHOWS:  The headline numbers again, the key findings, and an honest
+"limitations" panel.
+WHY:  A clean closing summary, and showing limitations builds credibility.
+
+
+==============================================================================
+  HOW A FUSION FILE IS PROCESSED FOR A PREDICTION (simple explanation)
+==============================================================================
+If asked "what actually happens when you upload that patient file?", here is
+the simple version of the pipeline:
+
+  STEP 1 - READ THE FILE
+    The uploaded patient bundle is opened and unpacked. Inside it has:
+      - the patient's genetic profile (their epilepsy-gene risk score), and
+      - a sequence of 30-second EEG windows with the brain-signal reading
+        for each window.
+
+  STEP 2 - SCORE EACH WINDOW WITH BOTH BRANCHES
+    For every 30-second window:
+      - the EEG branch gives a "how seizure-like is this brain activity right
+        now" score, and
+      - the genetic branch gives the patient's standing genetic risk score
+        (the same value every window, because genes don't change).
+
+  STEP 3 - THE ATTENTION GATE COMBINES THEM
+    The fusion model decides how much to trust each side using a weight called
+    "alpha". Roughly:
+
+        Final risk  =  alpha x (EEG score)  +  (1 - alpha) x (Genetic score)
+
+    If the patient carries strong epilepsy genes, the model puts more weight on
+    genetics; if not, it trusts the EEG more.
+
+  STEP 4 - TURN THE SCORE INTO AN ALERT
+    The final risk score (a number between 0 and 1) is mapped to the 4-level
+    clinical alert:
+        0.00 - 0.25  -> Low      (Green)
+        0.25 - 0.50  -> Moderate (Yellow)
+        0.50 - 0.75  -> High     (Orange)
+        0.75 - 1.00  -> Critical (Red)
+
+  STEP 5 - SHOW THE TIMELINE
+    Doing this for every window produces a risk timeline across the whole
+    recording, which the dashboard animates and colour-codes - so you can see
+    exactly when and how strongly the model raises an alarm.
+
+
+==============================================================================
+  QUICK ANSWERS TO LIKELY QUESTIONS
+==============================================================================
+Q: Why combine EEG with genetics?
+A: EEG shows what the brain is doing NOW; genetics shows the patient's
+   built-in risk. Together they give a more personalised, accurate warning -
+   our results show a 14.4% improvement over EEG alone.
+
+Q: What is the "attention gate" / alpha?
+A: A learned weight that decides, per patient, how much to rely on EEG vs
+   genetics. High-risk genes -> trust genetics more.
+
+Q: What do the alert colours mean?
+A: Green = low risk, Yellow = watch, Orange = high risk / pre-seizure,
+   Red = critical. They map directly to the final fused risk score.
+
+Q: Is the prediction live?
+A: Yes - when a patient fusion file is uploaded, the dashboard processes it
+   window by window and builds the risk timeline you see on screen.
+
+Q: What datasets are behind it?
+A: CHB-MIT scalp EEG (brain signals) plus ClinVar, gnomAD and GWAS (genetics).
+
+
+==============================================================================
+  OTHER THINGS WORTH KNOWING (good background for questions)
+==============================================================================
+
+THE THREE STATES THE MODEL LOOKS FOR
+  - Interictal = normal brain activity, far from any seizure.
+  - Preictal   = the build-up window BEFORE a seizure. This is the valuable
+                 one - catching it is "prediction" (an early warning).
+  - Ictal      = the seizure itself. Catching it is "detection".
+  The goal of the project is mainly PREDICTION - warning early enough to act.
+
+THE PREDICTION HORIZON (why this is "early warning", not just detection)
+  We label the 30 minutes before a seizure as the pre-seizure window, with a
+  5-minute safety gap before onset. In plain terms: the system aims to raise
+  an alarm with enough lead time for a patient or carer to react, not after the
+  seizure has already started.
+
+THE TWO MODELS, IN ONE LINE EACH
+  - EEG branch: a "Bidirectional LSTM with attention" - a neural network good
+    at finding patterns in time-series signals; the attention part lets it
+    focus on the most important moments in each 30-second window.
+  - Genetic branch: an "XGBoost" model - a strong, classic machine-learning
+    method that works very well on structured number tables like our 22-feature
+    genetic profile.
+
+WHAT THE HEADLINE NUMBERS ACTUALLY MEAN
+  - "AUC 0.888" (fusion): a measure of how well the model separates risky from
+    non-risky cases. 1.0 is perfect, 0.5 is random guessing. 0.888 is strong.
+  - "+14.4% over EEG-only": fusion is clearly better than brain signals alone -
+    this is the core result that justifies the whole project.
+  - EEG model on its own: ~96% accuracy, catches ~89% of actual seizures and
+    ~73% of pre-seizure windows.
+  - In direct comparison on the test set, fusion caught 55 MORE seizure-related
+    windows while also raising 61 FEWER false alarms than EEG alone - better on
+    both fronts at once.
+
+WHY WE FOCUS ON "AUC-PR" AND RECALL, NOT JUST ACCURACY
+  Seizures are very rare in the data (about 96% of windows are "normal"). A lazy
+  model could score 96% accuracy by always saying "no seizure" and be useless.
+  So we judge the model on how well it actually catches the rare seizure cases
+  (recall) and on AUC-PR, which is the fair measure when classes are imbalanced.
+  This is why the dashboard highlights those metrics.
+
+ABOUT THE GENETIC DATA (be ready for this one)
+  The public EEG dataset (CHB-MIT) does NOT come with patients' DNA. So for the
+  genetic side we built a large, biologically-informed synthetic patient cohort
+  using real population statistics (carrier frequencies, gene-constraint scores,
+  and published risk weights from the literature). It is grounded in real
+  genetics, but the per-patient pairing of EEG + genes is simulated. This is a
+  known, openly-stated limitation - and a natural "future work" point: validate
+  on a real cohort that has both EEG and sequencing.
+
+HONEST LIMITATIONS (saying these makes you look stronger, not weaker)
+  - Genetics are synthetic/simulated, as explained above.
+  - Because the synthetic genetic scores vary little, the attention gate settled
+    near a balanced split rather than swinging dramatically per patient; the
+    benefit still comes through clearly in the combined score.
+  - Results are on the CHB-MIT patient set; a larger, multi-hospital dataset
+    would be the next validation step.
+
+WHY THIS MATTERS (the real-world value)
+  - Personalisation: two patients with the same brain wave can have very
+    different underlying risk because of their genes. Fusion captures that.
+  - Early warning: predicting the pre-seizure window could let patients take
+    precautions or medication before a seizure hits.
+  - A clear, colour-coded 4-level alert is something a non-expert (a patient,
+    a carer, a nurse) can actually act on.
+
+WHERE THIS COULD GO NEXT (future work)
+  - Validate on a real cohort that has both EEG and genetic sequencing.
+  - Add more patients and more seizure types.
+  - Wrap it into a real-time bedside / wearable monitoring tool.
+
+
+
+"We turn a patient's brain signals and their genetics into one personalised
+seizure-risk score with a clear clinical alert - and fusing the two beats using
+either one alone."
+==============================================================================

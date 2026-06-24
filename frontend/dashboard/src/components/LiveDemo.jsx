@@ -2,13 +2,10 @@ import { useEffect, useRef, useState, useCallback } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import SectionHeader from './ui/SectionHeader'
 import Reveal from './ui/Reveal'
-import { checkHealth, predictEdf, buildSimulatedResult, API_BASE } from '../lib/api'
-
-const CLASS = [
-  { name: 'Interictal', color: '#64748b', desc: 'Normal activity' },
-  { name: 'Preictal', color: '#f59e0b', desc: 'Pre-seizure — alarm window' },
-  { name: 'Ictal', color: '#ef4444', desc: 'Seizure activity' },
-]
+import RiskGauge from './RiskGauge'
+import fusion from '../data/fusion.json'
+import { alertForScore } from '../lib/format'
+import { parseEgf } from '../lib/egf'
 
 function WindowTrace({ preview, color }) {
   const ref = useRef(null)
@@ -36,14 +33,14 @@ function WindowTrace({ preview, color }) {
     })
     ctx.stroke()
   }, [preview, color])
-  return <canvas ref={ref} className="w-full" style={{ height: 90 }} />
+  return <canvas ref={ref} className="w-full" style={{ height: 84 }} />
 }
 
-function ProbBar({ label, value, color }) {
+function ScoreBar({ label, value, color, sub }) {
   return (
     <div>
       <div className="flex justify-between text-xs mb-1">
-        <span className="text-slate-400">{label}</span>
+        <span className="text-slate-400">{label}{sub && <span className="text-slate-600"> · {sub}</span>}</span>
         <span className="stat-num" style={{ color }}>{(value * 100).toFixed(1)}%</span>
       </div>
       <div className="h-2 rounded-full bg-white/[0.06] overflow-hidden">
@@ -59,7 +56,6 @@ function ProbBar({ label, value, color }) {
 }
 
 export default function LiveDemo() {
-  const [status, setStatus] = useState('checking') // checking | online | offline
   const [result, setResult] = useState(null)
   const [playhead, setPlayhead] = useState(0)
   const [playing, setPlaying] = useState(false)
@@ -68,11 +64,6 @@ export default function LiveDemo() {
   const fileRef = useRef(null)
   const timerRef = useRef(null)
 
-  useEffect(() => {
-    checkHealth().then((r) => setStatus(r.online ? 'online' : 'offline'))
-  }, [])
-
-  // playback loop
   useEffect(() => {
     if (!playing || !result) return
     timerRef.current = setInterval(() => {
@@ -83,16 +74,27 @@ export default function LiveDemo() {
         }
         return p + 1
       })
-    }, 350)
+    }, 320)
     return () => clearInterval(timerRef.current)
   }, [playing, result])
 
-  const loadResult = useCallback((res) => {
+  const loadSample = useCallback((res) => {
     setResult(res)
     setPlayhead(0)
     setPlaying(true)
     setError(null)
   }, [])
+
+  const handleText = (text, name) => {
+    try {
+      const res = parseEgf(text)
+      res.filename = name
+      loadSample(res)
+    } catch (err) {
+      setError(err.message || 'Could not read the fusion bundle.')
+      setResult(null)
+    }
+  }
 
   const onUpload = async (e) => {
     const file = e.target.files?.[0]
@@ -100,187 +102,168 @@ export default function LiveDemo() {
     setBusy(true)
     setError(null)
     try {
-      const res = await predictEdf(file)
-      loadResult(res)
-    } catch (err) {
-      setError(err.message || 'Inference failed.')
+      const text = await file.text()
+      handleText(text, file.name)
+    } catch {
+      setError('Failed to read the file.')
     } finally {
       setBusy(false)
+      e.target.value = ''
     }
   }
 
-  const runSimulated = () => loadResult(buildSimulatedResult())
-
   const current = result?.windows?.[playhead]
-  const currentClass = current ? CLASS[current.pred_class] : null
+  const alert = current ? alertForScore(current.fused, fusion.alert_levels) : null
+  const peakAlert = result ? alertForScore(result.summary.max_fused, fusion.alert_levels) : null
 
   return (
     <section id="demo" className="section-pad">
       <SectionHeader
-        eyebrow="07 · Live Inference"
-        title="Run the model on an EEG recording"
-        subtitle="Upload a CHB-MIT .edf file and the trained BiLSTM classifies every 30-second window in real time — interictal, preictal, or ictal."
-        accentDot="#22d3ee"
+        eyebrow="07 · Live Fusion Inference"
+        title="Run the fusion model on a patient bundle"
+        subtitle="Upload an .egf bundle (EEG window scores + genetic profile) and watch the attention-gated fusion model produce a per-window risk score and clinical alert."
+        accentDot="#34d399"
       />
 
       <Reveal>
-        <div className="mt-10 glass p-6 sm:p-8 shadow-glow">
-          {/* status + controls */}
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-            <div className="flex items-center gap-3">
-              <span
-                className="inline-flex items-center gap-2 text-xs px-3 py-1.5 rounded-lg border"
-                style={{
-                  color: status === 'online' ? '#34d399' : status === 'offline' ? '#fb923c' : '#94a3b8',
-                  borderColor: status === 'online' ? '#34d39955' : status === 'offline' ? '#fb923c55' : '#ffffff22',
-                  background: status === 'online' ? '#34d39912' : 'transparent',
-                }}
-              >
-                <span className={`h-2 w-2 rounded-full ${status === 'checking' ? 'animate-pulse' : ''}`}
-                  style={{ background: status === 'online' ? '#34d399' : status === 'offline' ? '#fb923c' : '#94a3b8' }} />
-                {status === 'online' ? 'Model backend online' : status === 'offline' ? 'Backend offline' : 'Checking backend…'}
-              </span>
-            </div>
-
-            <div className="flex items-center gap-2">
-              <input ref={fileRef} type="file" accept=".edf" onChange={onUpload} className="hidden" />
-              <button
-                onClick={() => fileRef.current?.click()}
-                disabled={status !== 'online' || busy}
-                className="px-4 py-2 rounded-lg text-sm font-medium bg-eeg/15 text-eeg border border-eeg/30 hover:bg-eeg/25 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
-              >
-                {busy ? 'Analyzing…' : 'Upload .edf & analyze'}
-              </button>
-              <button
-                onClick={runSimulated}
-                className="px-4 py-2 rounded-lg text-sm font-medium glass glass-hover text-slate-200"
-              >
-                Play sample (simulated)
-              </button>
-            </div>
+        <div className="mt-10 glass p-6 sm:p-8 shadow-glow-emerald">
+          {/* controls */}
+          <div className="flex items-center justify-end gap-4">
+            <input ref={fileRef} type="file" accept=".egf" onChange={onUpload} className="hidden" />
+            <button
+              onClick={() => fileRef.current?.click()}
+              disabled={busy}
+              className="px-4 py-2 rounded-lg text-sm font-medium bg-fuse/15 text-fuse border border-fuse/30 hover:bg-fuse/25 transition-colors disabled:opacity-40"
+            >
+              {busy ? 'Reading…' : 'Upload .egf bundle'}
+            </button>
           </div>
 
-          {status === 'offline' && (
-            <div className="mt-4 text-xs text-slate-500">
-              Start the inference server to enable real uploads:{' '}
-              <code className="text-slate-300">./venv/bin/python -m uvicorn src.api.main:app --port 8000</code>.
-              Until then, the simulated playback demonstrates the workflow.
-            </div>
-          )}
           {error && <div className="mt-4 text-sm text-red-400">⚠ {error}</div>}
 
-          {/* results */}
           <AnimatePresence>
             {result && (
-              <motion.div
-                initial={{ opacity: 0, y: 12 }}
-                animate={{ opacity: 1, y: 0 }}
-                className="mt-6"
-              >
-                {result.simulated && (
-                  <div className="mb-4 text-xs px-3 py-2 rounded-lg bg-amber-500/10 border border-amber-500/30 text-amber-300 inline-block">
-                    Real-time Demo for Pre-Ictal Prediction
-                  </div>
-                )}
+              <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} className="mt-6">
+                {/* patient header */}
+                <div className="flex flex-wrap items-center gap-x-6 gap-y-1 mb-4 text-sm">
+                  <span className="text-slate-300">Patient <span className="stat-num text-white">{result.patient}</span></span>
+                  <span className="text-slate-500">·</span>
+                  <span className="text-slate-400">Genetic risk <span className="stat-num text-gene">{(result.genetic_score * 100).toFixed(0)}%</span></span>
+                  {result.genes.length > 0 && (
+                    <span className="flex items-center gap-1.5">
+                      {result.genes.map((g) => (
+                        <span key={g} className="text-[11px] font-mono px-2 py-0.5 rounded bg-gene/15 text-gene">{g}</span>
+                      ))}
+                    </span>
+                  )}
+                  <span className="text-slate-500">·</span>
+                  <span className="text-slate-400">α gate <span className="stat-num text-fuse">{result.alpha.toFixed(2)}</span></span>
+                </div>
 
                 <div className="grid lg:grid-cols-3 gap-4">
-                  {/* live signal + current prediction */}
+                  {/* signal + timeline */}
                   <div className="lg:col-span-2 rounded-xl bg-ink-950/60 border border-white/[0.05] p-4">
                     <div className="flex items-center justify-between mb-2">
                       <div className="text-sm text-slate-400">
                         Window {playhead + 1}/{result.n_windows} ·{' '}
-                        <span className="stat-num text-slate-300">
-                          {current?.start_sec}s–{current?.end_sec}s
-                        </span>
+                        <span className="stat-num text-slate-300">{current?.start_sec}s–{current?.end_sec}s</span>
                       </div>
                       <div className="flex items-center gap-2">
-                        <button
-                          onClick={() => setPlaying((p) => !p)}
-                          className="text-xs px-3 py-1 rounded-md bg-white/[0.06] hover:bg-white/[0.12] text-slate-200"
-                        >
+                        <button onClick={() => setPlaying((p) => !p)} className="text-xs px-3 py-1 rounded-md bg-white/[0.06] hover:bg-white/[0.12] text-slate-200">
                           {playing ? 'Pause' : 'Play'}
                         </button>
-                        <button
-                          onClick={() => { setPlayhead(0); setPlaying(true) }}
-                          className="text-xs px-3 py-1 rounded-md bg-white/[0.06] hover:bg-white/[0.12] text-slate-200"
-                        >
+                        <button onClick={() => { setPlayhead(0); setPlaying(true) }} className="text-xs px-3 py-1 rounded-md bg-white/[0.06] hover:bg-white/[0.12] text-slate-200">
                           Restart
                         </button>
                       </div>
                     </div>
 
-                    <WindowTrace preview={current?.preview} color={currentClass?.color} />
+                    <WindowTrace preview={current?.preview} color={alert?.color} />
 
-                    {/* timeline ribbon */}
+                    {/* timeline ribbon coloured by fused alert level */}
                     <div className="mt-3">
                       <div className="flex h-7 rounded-md overflow-hidden border border-white/[0.06]">
-                        {result.windows.map((w, i) => (
-                          <button
-                            key={i}
-                            onClick={() => { setPlayhead(i); setPlaying(false) }}
-                            title={`${w.start_sec}s · ${CLASS[w.pred_class].name}`}
-                            className="flex-1 transition-all"
-                            style={{
-                              background: CLASS[w.pred_class].color,
-                              opacity: i === playhead ? 1 : 0.5,
-                              outline: i === playhead ? '2px solid #fff' : 'none',
-                              outlineOffset: '-2px',
-                            }}
-                          />
-                        ))}
+                        {result.windows.map((w, i) => {
+                          const a = alertForScore(w.fused, fusion.alert_levels)
+                          return (
+                            <button
+                              key={i}
+                              onClick={() => { setPlayhead(i); setPlaying(false) }}
+                              title={`${w.start_sec}s · ${a.name} (${w.fused.toFixed(2)})`}
+                              className="flex-1 transition-all"
+                              style={{
+                                background: a.color,
+                                opacity: i === playhead ? 1 : 0.45,
+                                outline: i === playhead ? '2px solid #fff' : 'none',
+                                outlineOffset: '-2px',
+                              }}
+                            />
+                          )
+                        })}
                       </div>
                       <div className="mt-1 flex justify-between text-[10px] text-slate-600">
                         <span>0s</span>
-                        <span>seizure timeline · click to scrub</span>
+                        <span>fused-risk alert timeline · click to scrub</span>
                         <span>{result.duration_sec}s</span>
                       </div>
                     </div>
+
+                    {/* branch breakdown */}
+                    <div className="mt-4 space-y-3">
+                      <ScoreBar label="EEG branch" sub="BiLSTM preictal prob" value={current?.eeg_score || 0} color="#22d3ee" />
+                      <ScoreBar label="Genetic branch" sub="XGBoost risk" value={current?.genetic_score || 0} color="#a78bfa" />
+                      <div className="pt-1 flex items-center gap-3 text-xs text-slate-500">
+                        <span>Fusion gate:</span>
+                        <span className="flex-1 flex h-1.5 rounded-full overflow-hidden">
+                          <span style={{ width: `${result.alpha * 100}%`, background: '#22d3ee' }} />
+                          <span style={{ width: `${(1 - result.alpha) * 100}%`, background: '#a78bfa' }} />
+                        </span>
+                        <span className="stat-num">α={result.alpha.toFixed(2)}</span>
+                      </div>
+                      <p className="text-[11px] text-slate-600 leading-relaxed">
+                        α is the EEG weight set by the attention gate. The genetic risk is fixed per patient
+                        (genes don't change over time); stronger pathogenic variants shift trust toward the
+                        genetic branch — a lower α and a higher constant risk floor.
+                      </p>
+                    </div>
                   </div>
 
-                  {/* current probabilities */}
-                  <div className="rounded-xl bg-ink-950/60 border border-white/[0.05] p-4 flex flex-col">
-                    <div className="text-sm text-slate-400 mb-3">Model output</div>
+                  {/* fused output gauge */}
+                  <div className="rounded-xl bg-ink-950/60 border border-white/[0.05] p-4 flex flex-col items-center">
+                    <div className="text-sm text-slate-400 self-start mb-1">Fused risk · P_final</div>
+                    <RiskGauge value={current?.fused || 0} color={alert?.color || '#34d399'} levels={fusion.alert_levels} />
                     <AnimatePresence mode="wait">
                       <motion.div
-                        key={current?.pred_class}
+                        key={alert?.level}
                         initial={{ opacity: 0, scale: 0.95 }}
                         animate={{ opacity: 1, scale: 1 }}
-                        className="text-center mb-4 py-3 rounded-lg"
-                        style={{ background: `${currentClass?.color}1a`, border: `1px solid ${currentClass?.color}55` }}
+                        className="text-center mt-1"
                       >
-                        <div className="text-lg font-semibold" style={{ color: currentClass?.color }}>
-                          {currentClass?.name}
+                        <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg font-semibold text-sm"
+                          style={{ background: `${alert?.color}1f`, color: alert?.color, border: `1px solid ${alert?.color}55` }}>
+                          <span className="h-2 w-2 rounded-full animate-pulse" style={{ background: alert?.color }} />
+                          Level {alert?.level} · {alert?.name}
                         </div>
-                        <div className="text-xs text-slate-500">{currentClass?.desc}</div>
+                        <p className="text-xs text-slate-500 mt-1.5">{alert?.desc}</p>
                       </motion.div>
                     </AnimatePresence>
-                    <div className="space-y-3">
-                      <ProbBar label="Interictal" value={current?.p_interictal || 0} color="#64748b" />
-                      <ProbBar label="Preictal" value={current?.p_preictal || 0} color="#f59e0b" />
-                      <ProbBar label="Ictal" value={current?.p_ictal || 0} color="#ef4444" />
-                    </div>
                   </div>
                 </div>
 
                 {/* summary */}
                 <div className="mt-4 grid sm:grid-cols-4 gap-3">
-                  <SummaryCard label="Recording" value={result.filename} small />
-                  <SummaryCard label="Windows analyzed" value={`${result.n_windows} × 30s`} />
-                  <SummaryCard label="Max preictal prob" value={`${(result.summary.max_preictal_prob * 100).toFixed(0)}%`} color="#f59e0b" />
-                  <SummaryCard label="Max ictal prob" value={`${(result.summary.max_ictal_prob * 100).toFixed(0)}%`} color="#ef4444" />
+                  <SummaryCard label="Bundle" value={result.filename} small />
+                  <SummaryCard label="Windows" value={`${result.n_windows} × 30s`} />
+                  <SummaryCard label="Peak EEG branch" value={`${(result.summary.max_eeg * 100).toFixed(0)}%`} color="#22d3ee" />
+                  <SummaryCard label="Peak fused risk" value={`${(result.summary.max_fused * 100).toFixed(0)}%`} color={peakAlert?.color} />
                 </div>
 
                 <div className="mt-3 rounded-xl p-4 text-center font-medium"
-                  style={{
-                    background: result.summary.any_ictal ? '#ef444415' : result.summary.any_preictal ? '#f59e0b15' : '#34d39915',
-                    border: `1px solid ${result.summary.any_ictal ? '#ef444455' : result.summary.any_preictal ? '#f59e0b55' : '#34d39955'}`,
-                    color: result.summary.any_ictal ? '#fca5a5' : result.summary.any_preictal ? '#fcd34d' : '#6ee7b7',
-                  }}>
-                  {result.summary.any_ictal
-                    ? '⚠ Seizure (ictal) activity detected in this recording'
-                    : result.summary.any_preictal
-                    ? '⚠ Pre-seizure (preictal) activity detected — would trigger an early-warning alert'
-                    : '✓ No seizure-related activity detected'}
+                  style={{ background: `${peakAlert?.color}15`, border: `1px solid ${peakAlert?.color}55`, color: peakAlert?.color }}>
+                  {peakAlert?.level >= 4 && '⚠ Critical seizure risk detected — immediate intervention indicated'}
+                  {peakAlert?.level === 3 && '⚠ High seizure risk — preictal activity flagged, alert care team'}
+                  {peakAlert?.level === 2 && '◆ Moderate seizure risk — increased observation advised'}
+                  {peakAlert?.level === 1 && '✓ Low risk — no seizure-related activity detected'}
                 </div>
               </motion.div>
             )}
@@ -288,19 +271,10 @@ export default function LiveDemo() {
 
           {!result && (
             <div className="mt-8 text-center text-sm text-slate-500 py-8">
-              Upload an EEG recording or play the sample to see per-window seizure classification.
+              Upload an <code className="text-slate-400">.egf</code> bundle to run the fusion model.
             </div>
           )}
         </div>
-      </Reveal>
-
-      <Reveal>
-        <p className="mt-4 text-xs text-slate-600 text-center">
-          Real inference uses the all-patients BiLSTM ({API_BASE}). CHB-MIT .edf files can be downloaded from{' '}
-          <a className="text-eeg/70 hover:text-eeg" href="https://physionet.org/content/chbmit/1.0.0/" target="_blank" rel="noreferrer">
-            physionet.org/content/chbmit
-          </a>.
-        </p>
       </Reveal>
     </section>
   )

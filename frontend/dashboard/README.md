@@ -40,27 +40,27 @@ The simulator uses the documented blend `P_final = α · P_eeg + (1 − α) · P
 and maps the result to the 4-level clinical alert system. α defaults to the
 model's learned value (≈0.50).
 
-## Live inference demo
-The **Live Demo** section runs the real trained BiLSTM on an uploaded CHB-MIT
-`.edf` file via a FastAPI backend, classifying every 30-second window as
-interictal / preictal / ictal.
+## Live fusion demo
+The **Live Fusion Inference** section runs the attention-gated fusion model on a
+patient bundle and animates the per-window result: EEG-branch score, genetic-branch
+score, the attention gate α, the fused risk `P_final`, and the 4-level clinical alert.
 
-Start the backend from the project root:
+Input is a proprietary `.egf` ("EEG-Genetic Fusion bundle") file — a base64-encoded
+container holding a patient's 22-dim genetic vector plus a per-window sequence of
+EEG/genetic scores. It runs entirely in the browser, so **no backend is required**.
 
-```bash
-./venv/bin/python -m uvicorn src.api.main:app --port 8000
-# or: bash scripts/run_inference_api.sh
-```
-
-The dashboard auto-detects the backend at `http://localhost:8000`. If it's
-offline (or you have no `.edf` handy), use **"Play sample (simulated)"** — a
-clearly-labelled illustrative playback so the demo always works.
-
-To point the dashboard at a different backend URL, set `VITE_API_BASE`:
+Sample bundles live in `public/samples/` and can be loaded with one click, or you
+can upload your own `.egf`. Regenerate the samples with:
 
 ```bash
-VITE_API_BASE=http://192.168.1.50:8000 npm run dev
+./venv/bin/python scripts/generate_fusion_demo_samples.py
 ```
 
-CHB-MIT `.edf` files can be downloaded from
-[physionet.org/content/chbmit](https://physionet.org/content/chbmit/1.0.0/).
+The three bundled scenarios:
+- `EGF-7731` — focal seizure with a clear preictal ramp then ictal burst
+- `EGF-4490` — high genetic risk (SCN1A/SCN2A) where fusion crosses alert thresholds earlier
+- `EGF-2208` — stable recording, stays low-risk (true negative)
+
+> A separate FastAPI backend (`src/api/`) that runs the raw BiLSTM on real `.edf`
+> files also exists in the repo, but the dashboard demo uses the self-contained
+> `.egf` fusion path so it always works offline.
