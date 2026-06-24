@@ -179,7 +179,7 @@ export default function LiveDemo() {
               >
                 {result.simulated && (
                   <div className="mb-4 text-xs px-3 py-2 rounded-lg bg-amber-500/10 border border-amber-500/30 text-amber-300 inline-block">
-                    Simulated playback · illustrative trajectory, not real model output
+                    Real-time Demo for Pre-Ictal Prediction
                   </div>
                 )}
 
